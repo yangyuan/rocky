@@ -1,0 +1,25 @@
+{
+  "openai": [
+    {"name": "gpt-5.4", "label": "GPT-5.4", "recommended": true},
+    {"name": "gpt-5.4-mini", "label": "GPT-5.4 mini"}
+  ],
+  "azure_openai": [
+    {"name": "gpt-5.4", "label": "GPT-5.4", "recommended": true},
+    {"name": "gpt-5.4-mini", "label": "GPT-5.4 mini"}
+  ],
+  "litertlm": [
+    {
+      "name": "gemma-4-e2b",
+      "label": "Gemma 4 E2B",
+      "download_url": "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm",
+      "size_bytes": 2580000000,
+      "recommended": true
+    },
+    {
+      "name": "gemma-4-e4b",
+      "label": "Gemma 4 E4B",
+      "download_url": "https://huggingface.co/litert-community/gemma-4-E4B-it-litert-lm/resolve/main/gemma-4-E4B-it.litertlm",
+      "size_bytes": 3650000000
+    }
+  ]
+}
