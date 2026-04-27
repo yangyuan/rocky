@@ -29,6 +29,7 @@ from rocky.settings import RockySettings
 from rocky.widgets.dialog import RockyDialog
 from rocky.widgets.settings.chats.page import RockySettingsChatsPage
 from rocky.widgets.settings.models.page import RockySettingsModelsPage
+from rocky.widgets.settings.shells.page import RockySettingsShellsPage
 
 
 class _NavigationRow(StatelessWidget):
@@ -89,12 +90,14 @@ class RockySettingsDialog(StatefulWidget):
         *,
         settings: RockySettings,
         chats: RockyChats,
+        initial_page: str = "models",
         on_close=None,
         key=None,
     ):
         super().__init__(key=key)
         self.settings = settings
         self.chats = chats
+        self.initial_page = initial_page
         self.on_close = on_close
 
     def createState(self):
@@ -103,7 +106,7 @@ class RockySettingsDialog(StatefulWidget):
 
 class _RockySettingsDialogState(State[RockySettingsDialog]):
     def initState(self):
-        self.page = "models"
+        self.page = self.widget.initial_page
         self.widget.settings.addListener(self._on_settings_changed)
 
     def dispose(self):
@@ -137,6 +140,12 @@ class _RockySettingsDialogState(State[RockySettingsDialog]):
                         onTap=lambda: self._set_page("models"),
                     ),
                     _NavigationRow(
+                        icon=Icons.storage,
+                        label="Environments",
+                        is_selected=self.page == "shells",
+                        onTap=lambda: self._set_page("shells"),
+                    ),
+                    _NavigationRow(
                         icon=Icons.chat_bubble_outline,
                         label="Chats",
                         is_selected=self.page == "chats",
@@ -158,6 +167,18 @@ class _RockySettingsDialogState(State[RockySettingsDialog]):
             on_select_profile=settings.select_profile,
         )
 
+    def _shells_body(self):
+        settings = self.widget.settings
+        return RockySettingsShellsPage(
+            key=ValueKey("settings-shells"),
+            shells=settings.shells,
+            selected_shell_ids=settings.selected_shell_ids,
+            on_add_shell=settings.add_shell,
+            on_update_shell=settings.update_shell,
+            on_delete_shell=settings.delete_shell,
+            on_set_shell_selected=settings.set_shell_selected,
+        )
+
     def _body(self):
         if self.page == "chats":
             return RockySettingsChatsPage(
@@ -165,6 +186,8 @@ class _RockySettingsDialogState(State[RockySettingsDialog]):
                 settings=self.widget.settings,
                 chats=self.widget.chats,
             )
+        if self.page == "shells":
+            return self._shells_body()
         return self._models_body()
 
     def build(self, context):

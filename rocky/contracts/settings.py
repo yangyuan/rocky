@@ -5,6 +5,7 @@ from typing import Optional
 from pydantic import BaseModel, Field
 
 from rocky.contracts.model import RockyModelProfile
+from rocky.contracts.shell import RockyShellProfile
 
 
 class RockyThemeSettings(BaseModel):
@@ -22,3 +23,5 @@ class RockySettingsData(BaseModel):
     chats: RockyChatsSettings = Field(default_factory=RockyChatsSettings)
     models: list[RockyModelProfile] = Field(default_factory=list)
     selected_model_id: Optional[str] = None
+    shells: list[RockyShellProfile] = Field(default_factory=list)
+    selected_shell_ids: list[str] = Field(default_factory=list)

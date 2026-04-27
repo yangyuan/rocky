@@ -37,11 +37,17 @@ from flut.flutter.widgets import (
 from flut.flutter.widgets.navigator import Navigator
 from flut.flutter.foundation.key import ValueKey
 
-from rocky.contracts.model import RockyModelProfile
+from rocky.contracts.model import (
+    RockyModelCapability,
+    RockyModelProfile,
+    RockyModelProviderName,
+)
+from rocky.models.capabilities import RockyModelCapabilities
 from rocky.models.templates import RockyModelTemplates
 from rocky.system import RockySystem
 from rocky.widgets.dialog import RockyDialog
 from rocky.widgets.settings.field import RockySettingsField
+from rocky.widgets.settings.models.capabilities import RockyModelCapabilityFields
 from rocky.widgets.settings.models.provider_picker import RockyProviderPicker
 
 
@@ -70,9 +76,13 @@ class _RockyModelProfileEditorState(State[RockyModelProfileEditor]):
             self.profile_id: Optional[str] = None
             self.display_name = ""
             self.display_name_overridden = False
-            self.provider = "openai"
+            self.provider = RockyModelProviderName.OPENAI
             recommended = RockyModelTemplates.recommended(self.provider)
             self.name = recommended.name if recommended else ""
+            self.capabilities = RockyModelCapabilities.baseline(
+                self.provider,
+                self.name,
+            )
             self.key = ""
             self.endpoint = ""
             self.deployment = ""
@@ -81,6 +91,7 @@ class _RockyModelProfileEditorState(State[RockyModelProfileEditor]):
             self.display_name = initial.display_name
             self.provider = initial.provider
             self.name = initial.name
+            self.capabilities = self._initial_capabilities(initial)
             self.key = initial.key
             self.endpoint = initial.endpoint
             self.deployment = initial.deployment
@@ -95,9 +106,15 @@ class _RockyModelProfileEditorState(State[RockyModelProfileEditor]):
     def is_edit(self) -> bool:
         return self.profile_id is not None
 
+    def _initial_capabilities(
+        self,
+        initial: RockyModelProfile,
+    ) -> list[RockyModelCapability]:
+        return RockyModelCapabilities.effective(initial)
+
     def _derived_display_name(self) -> str:
         provider_label = RockyModelTemplates.label(self.provider)
-        if self.provider == "litertlm":
+        if self.provider == RockyModelProviderName.LITERTLM:
             return provider_label
         name = (self.name or "").strip()
         if not name:
@@ -114,7 +131,10 @@ class _RockyModelProfileEditorState(State[RockyModelProfileEditor]):
         return self._derived_display_name()
 
     def _set_provider(self, provider):
-        if provider == "litertlm" and not RockySystem.is_litert_lm_installed():
+        if (
+            provider == RockyModelProviderName.LITERTLM
+            and not RockySystem.is_litert_lm_installed()
+        ):
             self._show_litertlm_warning(
                 on_continue=lambda: self._apply_provider(provider),
             )
@@ -125,10 +145,14 @@ class _RockyModelProfileEditorState(State[RockyModelProfileEditor]):
         def _apply():
             self.provider = provider
             recommended = RockyModelTemplates.recommended(provider)
-            if provider == "litertlm":
+            if provider == RockyModelProviderName.LITERTLM:
                 self.name = ""
             else:
                 self.name = recommended.name if recommended else ""
+            self.capabilities = RockyModelCapabilities.baseline(
+                self.provider,
+                self.name,
+            )
             self.endpoint = ""
             self.deployment = ""
             self.error = None
@@ -172,6 +196,12 @@ class _RockyModelProfileEditorState(State[RockyModelProfileEditor]):
     def _set_deployment(self, value):
         self.deployment = value
 
+    def _set_capabilities(self, value: list[RockyModelCapability]):
+        def _apply():
+            self.capabilities = value
+
+        self.setState(_apply)
+
     def _set_error(self, message):
         def _apply():
             self.error = message
@@ -181,6 +211,10 @@ class _RockyModelProfileEditorState(State[RockyModelProfileEditor]):
     def _pick_template(self, value):
         def _apply():
             self.name = value
+            self.capabilities = RockyModelCapabilities.baseline(
+                self.provider,
+                value,
+            )
             self._name_field_revision += 1
 
         self.setState(_apply)
@@ -190,19 +224,31 @@ class _RockyModelProfileEditorState(State[RockyModelProfileEditor]):
         if not display:
             self._set_error("Display name is required.")
             return
-        if not (self.name or "").strip() and self.provider == "litertlm":
+        if (
+            not (self.name or "").strip()
+            and self.provider == RockyModelProviderName.LITERTLM
+        ):
             self._set_error("Please choose a model file path.")
             return
         if not (self.name or "").strip():
             self._set_error("Please choose a model.")
             return
-        if self.provider != "litertlm" and not (self.key or "").strip():
+        if (
+            self.provider != RockyModelProviderName.LITERTLM
+            and not (self.key or "").strip()
+        ):
             self._set_error("API key is required.")
             return
-        if self.provider == "azure_openai" and not (self.endpoint or "").strip():
+        if (
+            self.provider == RockyModelProviderName.AZURE_OPENAI
+            and not (self.endpoint or "").strip()
+        ):
             self._set_error("Endpoint is required.")
             return
-        if self.provider == "litertlm" and not RockySystem.is_litert_lm_installed():
+        if (
+            self.provider == RockyModelProviderName.LITERTLM
+            and not RockySystem.is_litert_lm_installed()
+        ):
             self._show_litertlm_warning(on_continue=self._save)
             return
         self._save()
@@ -213,6 +259,11 @@ class _RockyModelProfileEditorState(State[RockyModelProfileEditor]):
             display_name=self._effective_display_name().strip(),
             provider=self.provider,
             name=(self.name or "").strip(),
+            capabilities=RockyModelCapabilities.profile_overrides(
+                provider=self.provider,
+                name=(self.name or "").strip(),
+                capabilities=list(self.capabilities),
+            ),
             key=self.key,
             endpoint=(self.endpoint or "").strip(),
             deployment=(self.deployment or "").strip(),
@@ -232,6 +283,10 @@ class _RockyModelProfileEditorState(State[RockyModelProfileEditor]):
 
         def _apply():
             self.name = path
+            self.capabilities = RockyModelCapabilities.baseline(
+                self.provider,
+                self.name,
+            )
             self.error = None
 
         self.setState(_apply)
@@ -284,7 +339,7 @@ class _RockyModelProfileEditorState(State[RockyModelProfileEditor]):
         )
 
     def _provider_specific(self, color_scheme):
-        if self.provider == "litertlm":
+        if self.provider == RockyModelProviderName.LITERTLM:
             return [
                 Row(
                     crossAxisAlignment=CrossAxisAlignment.end,
@@ -299,18 +354,15 @@ class _RockyModelProfileEditorState(State[RockyModelProfileEditor]):
                             ),
                         ),
                         SizedBox(width=8),
-                        Container(
-                            padding=EdgeInsets.only(bottom=22),
-                            child=OutlinedButton(
-                                onPressed=self._browse_litertlm_file,
-                                child=Row(
-                                    mainAxisSize=MainAxisSize.min,
-                                    children=[
-                                        Icon(Icons.folder_open, size=16),
-                                        SizedBox(width=6),
-                                        Text("Browse\u2026"),
-                                    ],
-                                ),
+                        OutlinedButton(
+                            onPressed=self._browse_litertlm_file,
+                            child=Row(
+                                mainAxisSize=MainAxisSize.min,
+                                children=[
+                                    Icon(Icons.folder_open, size=16),
+                                    SizedBox(width=6),
+                                    Text("Browse\u2026"),
+                                ],
                             ),
                         ),
                     ],
@@ -318,28 +370,29 @@ class _RockyModelProfileEditorState(State[RockyModelProfileEditor]):
             ]
 
         templates = RockyModelTemplates.all(self.provider)
+        provider_name = self.provider.value
         children = [
             RockySettingsField(
-                key=ValueKey(f"api-key-{self.provider}"),
+                key=ValueKey(f"api-key-{provider_name}"),
                 label="API key",
                 value=self.key,
                 on_changed=self._set_key,
                 hint_text="sk-...",
                 helper=(
                     "Stored locally in config.json."
-                    if self.provider == "openai"
+                    if self.provider == RockyModelProviderName.OPENAI
                     else "Stored locally in config.json. Sent only to your Azure endpoint."
                 ),
                 obscure=True,
             ),
         ]
 
-        if self.provider == "azure_openai":
+        if self.provider == RockyModelProviderName.AZURE_OPENAI:
             children.extend(
                 [
                     SizedBox(height=14),
                     RockySettingsField(
-                        key=ValueKey(f"endpoint-{self.provider}"),
+                        key=ValueKey(f"endpoint-{provider_name}"),
                         label="Endpoint",
                         value=self.endpoint,
                         on_changed=self._set_endpoint,
@@ -353,7 +406,7 @@ class _RockyModelProfileEditorState(State[RockyModelProfileEditor]):
                 SizedBox(height=18),
                 RockySettingsField(
                     key=ValueKey(
-                        f"model-name-{self.provider}-{self._name_field_revision}"
+                        f"model-name-{provider_name}-{self._name_field_revision}"
                     ),
                     label="Model",
                     value=self.name,
@@ -366,12 +419,12 @@ class _RockyModelProfileEditorState(State[RockyModelProfileEditor]):
             ]
         )
 
-        if self.provider == "azure_openai":
+        if self.provider == RockyModelProviderName.AZURE_OPENAI:
             children.extend(
                 [
                     SizedBox(height=14),
                     RockySettingsField(
-                        key=ValueKey(f"deployment-{self.provider}"),
+                        key=ValueKey(f"deployment-{provider_name}"),
                         label="Deployment name (optional)",
                         value=self.deployment,
                         on_changed=self._set_deployment,
@@ -382,6 +435,18 @@ class _RockyModelProfileEditorState(State[RockyModelProfileEditor]):
             )
 
         return children
+
+    def _capability_fields(self):
+        if not self.capabilities:
+            return []
+        return [
+            SizedBox(height=18),
+            RockyModelCapabilityFields(
+                definitions=RockyModelCapabilities.definitions(),
+                capabilities=self.capabilities,
+                on_changed=self._set_capabilities,
+            ),
+        ]
 
     def build(self, context):
         color_scheme = Theme.of(context).colorScheme
@@ -419,6 +484,7 @@ class _RockyModelProfileEditorState(State[RockyModelProfileEditor]):
             ),
             SizedBox(height=18),
             *self._provider_specific(color_scheme),
+            *self._capability_fields(),
         ]
 
         if self.error:

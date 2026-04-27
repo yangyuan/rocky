@@ -14,6 +14,7 @@ from rocky.chat import RockyChat
 from rocky.contracts.agent import RockyAgentConfig
 from rocky.contracts.chat import RockyChatData, RockyChatMessage, RockyChatMetadata
 from flut.flutter.foundation.change_notifier import ChangeNotifier
+from rocky.models.capabilities import RockyModelCapabilities
 from rocky.settings import RockySettings
 
 logger = logging.getLogger(__name__)
@@ -135,7 +136,15 @@ class RockyChats(ChangeNotifier):
         profile = self._settings.selected_profile
         if profile is None:
             return None
-        return RockyAgentConfig(model_profile=profile)
+        shells = (
+            self._settings.selected_shells
+            if RockyModelCapabilities.supports_function(profile)
+            else []
+        )
+        return RockyAgentConfig(
+            model_profile=profile,
+            shell_profiles=shells,
+        )
 
     def _apply_settings(self) -> None:
         self._enforce_max_chats()

@@ -27,7 +27,7 @@ class RockyHome(StatelessWidget):
         self.chats = chats
         self.on_exit = on_exit
 
-    def _open_settings(self, context):
+    def _open_settings(self, context, initial_page="models"):
         showDialog(
             context=context,
             barrierColor=Colors.grey800.withOpacity(0.8),
@@ -37,6 +37,7 @@ class RockyHome(StatelessWidget):
                 child=RockySettingsDialog(
                     settings=self.settings,
                     chats=self.chats,
+                    initial_page=initial_page,
                 ),
             ),
         )
@@ -53,7 +54,10 @@ class RockyHome(StatelessWidget):
         )
 
     def build(self, context):
-        open_settings = lambda: self._open_settings(context)
+        open_settings = lambda initial_page="models": self._open_settings(
+            context,
+            initial_page=initial_page,
+        )
         open_about = lambda: self._open_about(context)
 
         menu = RockyAppMenu(

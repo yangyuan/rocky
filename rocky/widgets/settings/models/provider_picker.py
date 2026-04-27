@@ -15,7 +15,7 @@ from flut.flutter.widgets import (
     Text,
 )
 
-from rocky.contracts.model import RockyModelProvider
+from rocky.contracts.model import RockyModelProviderName
 from rocky.models.templates import RockyModelTemplates
 
 
@@ -25,7 +25,7 @@ class RockyProviderPicker(StatelessWidget):
         *,
         value,
         on_changed,
-        disabled_providers: dict[RockyModelProvider, str] | None = None,
+        disabled_providers: dict[RockyModelProviderName, str] | None = None,
         key=None,
     ):
         super().__init__(key=key)

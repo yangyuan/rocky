@@ -183,9 +183,7 @@ class _RockySettingsModelsPageState(State[RockySettingsModelsPage]):
             SizedBox(height=4),
             Text(
                 (
-                    "Add the models Rocky can chat with. Switch between them from the chat header."
-                    if profiles
-                    else "Add at least one model to start chatting."
+                    "Models are OpenAI, Azure OpenAI, LiteRT-LM, or other model profiles Rocky can use to chat and reason with you."
                 ),
                 style=TextStyle(
                     fontSize=12,
