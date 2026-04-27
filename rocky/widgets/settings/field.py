@@ -49,6 +49,12 @@ class _RockySettingsFieldState(State[RockySettingsField]):
     def initState(self):
         self._controller = TextEditingController(text=self.widget.value)
 
+    def didUpdateWidget(self, old_widget):
+        if not isinstance(self.widget, RockySettingsField):
+            return
+        if self._controller.text != self.widget.value:
+            self._controller.text = self.widget.value
+
     def dispose(self):
         self._controller.dispose()
 
@@ -100,21 +106,19 @@ class _RockySettingsFieldState(State[RockySettingsField]):
                 ),
             ),
         ]
-        helper_text = self.widget.helper if self.widget.helper else " "
-        helper_color = (
-            color_scheme.onSurfaceVariant
-            if self.widget.helper
-            else color_scheme.onSurfaceVariant.withOpacity(0)
-        )
-        children.extend(
-            [
-                SizedBox(height=4),
-                Text(
-                    helper_text,
-                    style=TextStyle(fontSize=11, color=helper_color),
-                ),
-            ]
-        )
+        if self.widget.helper:
+            children.extend(
+                [
+                    SizedBox(height=4),
+                    Text(
+                        self.widget.helper,
+                        style=TextStyle(
+                            fontSize=11,
+                            color=color_scheme.onSurfaceVariant,
+                        ),
+                    ),
+                ]
+            )
         return Column(
             crossAxisAlignment=CrossAxisAlignment.stretch,
             children=children,

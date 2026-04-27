@@ -19,26 +19,25 @@ from flut.flutter.widgets import (
     Text,
 )
 
-from rocky.contracts.model import RockyModelProfile, RockyModelProviderName
-from rocky.models.templates import RockyModelTemplates
-from rocky.system import RockySystem
+from rocky.contracts.shell import RockyShellProfile
+from rocky.widgets.settings.shells.type_picker import RockyShellTemplates
 
 
-class RockyModelProfileCard(StatelessWidget):
+class RockyShellProfileCard(StatelessWidget):
     def __init__(
         self,
         *,
-        profile: RockyModelProfile,
-        is_active: bool,
-        on_select,
+        profile: RockyShellProfile,
+        is_selected: bool,
+        on_set_selected,
         on_edit,
         on_delete,
         key=None,
     ):
         super().__init__(key=key)
         self.profile = profile
-        self.is_active = is_active
-        self.on_select = on_select
+        self.is_selected = is_selected
+        self.on_set_selected = on_set_selected
         self.on_edit = on_edit
         self.on_delete = on_delete
 
@@ -62,46 +61,26 @@ class RockyModelProfileCard(StatelessWidget):
     def build(self, context):
         color_scheme = Theme.of(context).colorScheme
         profile = self.profile
-        provider_label = RockyModelTemplates.label(profile.provider)
-        subtitle = f"{provider_label} \u00b7 {profile.name or '(no model)'}"
-        is_selectable = not (
-            profile.provider == RockyModelProviderName.LITERTLM
-            and not RockySystem.is_litert_lm_installed()
-        )
-
+        type_label = RockyShellTemplates.label(profile.shell_type)
+        target = RockyShellTemplates.target(profile)
         badges = [
             self._badge(
-                provider_label,
+                type_label,
                 color_scheme.surfaceContainerHighest,
                 color_scheme.onSurfaceVariant,
             ),
         ]
-        if self.is_active:
+        if self.is_selected:
             badges.extend(
                 [
                     SizedBox(width=6),
                     self._badge(
-                        "Active",
+                        "Selected",
                         color_scheme.primary,
                         color_scheme.onPrimary,
                     ),
                 ]
             )
-        if (
-            profile.provider == RockyModelProviderName.LITERTLM
-            and not RockySystem.is_litert_lm_installed()
-        ):
-            badges.extend(
-                [
-                    SizedBox(width=6),
-                    self._badge(
-                        "LiteRT-LM not installed",
-                        color_scheme.errorContainer,
-                        color_scheme.onErrorContainer,
-                    ),
-                ]
-            )
-
         body = Container(
             padding=EdgeInsets.fromLTRB(14, 12, 8, 12),
             child=Row(
@@ -111,26 +90,29 @@ class RockyModelProfileCard(StatelessWidget):
                         child=Column(
                             crossAxisAlignment=CrossAxisAlignment.start,
                             children=[
-                                Row(
-                                    mainAxisSize=MainAxisSize.min,
-                                    children=badges,
-                                ),
+                                Row(mainAxisSize=MainAxisSize.min, children=badges),
                                 SizedBox(height=6),
                                 Text(
-                                    profile.display_name or "Untitled model",
+                                    profile.display_name or "Untitled environment",
                                     style=TextStyle(
                                         fontSize=14,
                                         fontWeight=FontWeight.w600,
                                         color=color_scheme.onSurface,
                                     ),
                                 ),
-                                SizedBox(height=2),
-                                Text(
-                                    subtitle,
-                                    style=TextStyle(
-                                        fontSize=11,
-                                        color=color_scheme.onSurfaceVariant,
-                                    ),
+                                *(
+                                    [
+                                        SizedBox(height=2),
+                                        Text(
+                                            target,
+                                            style=TextStyle(
+                                                fontSize=11,
+                                                color=color_scheme.onSurfaceVariant,
+                                            ),
+                                        ),
+                                    ]
+                                    if target
+                                    else []
                                 ),
                             ],
                         ),
@@ -156,7 +138,6 @@ class RockyModelProfileCard(StatelessWidget):
                 ],
             ),
         )
-
         return Container(
             margin=EdgeInsets.only(bottom=10),
             decoration=BoxDecoration(
@@ -165,7 +146,7 @@ class RockyModelProfileCard(StatelessWidget):
                     width=1,
                     color=(
                         color_scheme.primary
-                        if self.is_active
+                        if self.is_selected
                         else color_scheme.outlineVariant
                     ),
                 ),
@@ -174,8 +155,8 @@ class RockyModelProfileCard(StatelessWidget):
                 color=Colors.transparent,
                 borderRadius=BorderRadius.circular(10),
                 child=InkWell(
-                    onTap=(
-                        (lambda: self.on_select(profile.id)) if is_selectable else None
+                    onTap=lambda: self.on_set_selected(
+                        profile.id, not self.is_selected
                     ),
                     borderRadius=BorderRadius.circular(10),
                     hoverColor=color_scheme.onSurface.withOpacity(0.04),

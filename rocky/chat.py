@@ -8,7 +8,11 @@ from typing import Callable, Optional
 from flut.flutter.scheduler import SchedulerBinding
 
 from rocky.agent import RockyAgent
-from rocky.contracts.agent import RockyAgentConfig, RockyAgentStatus
+from rocky.contracts.agent import (
+    RockyAgentConfig,
+    RockyAgentStatus,
+    RockyAgentStreamEventKind,
+)
 from rocky.contracts.chat import (
     DEFAULT_CHAT_TITLE,
     RockyAttachment,
@@ -155,9 +159,6 @@ class RockyChat(ChangeNotifier):
         self._messages.append(
             RockyChatMessage(role="user", content=text, attachments=attachments)
         )
-        self._messages.append(
-            RockyChatMessage(role="assistant", content="", streaming=True)
-        )
         self._metadata = self._metadata.model_copy(update={"updated_at": time.time()})
         if (
             self._metadata.title == DEFAULT_CHAT_TITLE
@@ -196,13 +197,16 @@ class RockyChat(ChangeNotifier):
     ) -> None:
         cancelled = False
         try:
-            async for delta in self._agent.stream_reply(user_text, attachments):
+            async for event in self._agent.stream_reply(user_text, attachments):
                 if RockySystem.is_shutting_down():
                     return
-                last = self._messages[-1]
-                last.content = (last.content or "") + delta
-                self._stream_notifier.notifyListeners()
-            self._messages[-1].streaming = False
+                if event.type == RockyAgentStreamEventKind.TEXT_DELTA:
+                    last = self._ensure_streaming_reply()
+                    last.content = (last.content or "") + event.delta
+                    self._stream_notifier.notifyListeners()
+                elif event.type == RockyAgentStreamEventKind.MESSAGE_BOUNDARY:
+                    self._finish_streaming_reply(remove_empty=True)
+            self._finish_streaming_reply(remove_empty=True)
         except asyncio.CancelledError:
             cancelled = True
             raise
@@ -213,9 +217,7 @@ class RockyChat(ChangeNotifier):
         except Exception as exc:
             if RockySystem.is_shutting_down():
                 return
-            self._messages[-1].streaming = False
-            if not self._messages[-1].content:
-                self._messages.pop()
+            self._finish_streaming_reply(remove_empty=True)
             logger.warning("Chat stream failed: %s", exc)
         finally:
             if not cancelled and not RockySystem.is_shutting_down():
@@ -225,6 +227,31 @@ class RockyChat(ChangeNotifier):
                 self.notifyListeners()
                 self._on_message_complete(self)
                 self._maybe_refresh_title()
+
+    def _ensure_streaming_reply(self) -> RockyChatMessage:
+        if (
+            self._messages
+            and self._messages[-1].role == "assistant"
+            and self._messages[-1].streaming
+        ):
+            return self._messages[-1]
+        message = RockyChatMessage(role="assistant", content="", streaming=True)
+        self._messages.append(message)
+        self.notifyListeners()
+        return message
+
+    def _finish_streaming_reply(self, *, remove_empty: bool) -> None:
+        if (
+            not self._messages
+            or self._messages[-1].role != "assistant"
+            or not self._messages[-1].streaming
+        ):
+            return
+        if remove_empty and not (self._messages[-1].content or "").strip():
+            self._messages.pop()
+        else:
+            self._messages[-1].streaming = False
+        self.notifyListeners()
 
     def _maybe_refresh_title(self) -> None:
         if self._agent is None:

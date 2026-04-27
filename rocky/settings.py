@@ -8,12 +8,13 @@ from typing import Optional
 
 from pydantic import ValidationError
 
-from rocky.contracts.model import RockyModelProfile
+from rocky.contracts.model import RockyModelProfile, RockyModelProviderName
 from rocky.contracts.settings import (
     RockyChatsSettings,
     RockySettingsData,
     RockyThemeSettings,
 )
+from rocky.contracts.shell import RockyShellProfile
 from rocky.system import RockySystem
 from flut.flutter.foundation.change_notifier import ChangeNotifier
 
@@ -35,6 +36,8 @@ class RockySettings(ChangeNotifier):
         self._chats = RockyChatsSettings()
         self._profiles: list[RockyModelProfile] = []
         self._selected_profile_id: Optional[str] = None
+        self._shells: list[RockyShellProfile] = []
+        self._selected_shell_ids: list[str] = []
         self._load()
 
     @classmethod
@@ -90,11 +93,24 @@ class RockySettings(ChangeNotifier):
                 return profile
         return None
 
+    @property
+    def shells(self) -> list[RockyShellProfile]:
+        return list(self._shells)
+
+    @property
+    def selected_shell_ids(self) -> list[str]:
+        return list(self._selected_shell_ids)
+
+    @property
+    def selected_shells(self) -> list[RockyShellProfile]:
+        selected_ids = set(self._selected_shell_ids)
+        return [shell for shell in self._shells if shell.id in selected_ids]
+
     def chat_ready(self) -> tuple[bool, Optional[str]]:
         profile = self.selected_profile
         if profile is None:
             return False, "Configure a model in Settings."
-        if profile.provider == "litertlm":
+        if profile.provider == RockyModelProviderName.LITERTLM:
             if not RockySystem.is_litert_lm_installed():
                 return False, "LiteRT-LM is not installed."
             if not profile.name:
@@ -102,7 +118,10 @@ class RockySettings(ChangeNotifier):
             return True, None
         if not profile.name or not profile.key:
             return False, "Configure a model in Settings."
-        if profile.provider == "azure_openai" and not profile.endpoint:
+        if (
+            profile.provider == RockyModelProviderName.AZURE_OPENAI
+            and not profile.endpoint
+        ):
             return False, "Configure a model in Settings."
         return True, None
 
@@ -169,9 +188,57 @@ class RockySettings(ChangeNotifier):
         self._selected_profile_id = profile_id
         self._save_and_notify()
 
+    def add_shell(self, shell: RockyShellProfile) -> RockyShellProfile:
+        self._shells = self._shells + [shell]
+        if not self._selected_shell_ids:
+            self._selected_shell_ids = [shell.id]
+        self._save_and_notify()
+        return shell
+
+    def update_shell(self, shell: RockyShellProfile) -> RockyShellProfile:
+        replaced = False
+        new_shells: list[RockyShellProfile] = []
+        for existing in self._shells:
+            if existing.id == shell.id:
+                new_shells.append(shell)
+                replaced = True
+            else:
+                new_shells.append(existing)
+        if not replaced:
+            return shell
+        self._shells = new_shells
+        self._save_and_notify()
+        return shell
+
+    def delete_shell(self, shell_id: str) -> None:
+        self._shells = [shell for shell in self._shells if shell.id != shell_id]
+        self._selected_shell_ids = [
+            selected_id
+            for selected_id in self._selected_shell_ids
+            if selected_id != shell_id
+        ]
+        self._save_and_notify()
+
+    def set_shell_selected(self, shell_id: str, selected: bool) -> None:
+        shell = next((item for item in self._shells if item.id == shell_id), None)
+        if shell is None:
+            return
+        selected_ids = list(self._selected_shell_ids)
+        already_selected = shell_id in selected_ids
+        if selected and not already_selected:
+            selected_ids.append(shell_id)
+        elif not selected and already_selected:
+            selected_ids = [
+                selected_id for selected_id in selected_ids if selected_id != shell_id
+            ]
+        else:
+            return
+        self._selected_shell_ids = selected_ids
+        self._save_and_notify()
+
     @staticmethod
     def _is_selectable(profile: RockyModelProfile) -> bool:
-        if profile.provider == "litertlm":
+        if profile.provider == RockyModelProviderName.LITERTLM:
             return RockySystem.is_litert_lm_installed()
         return True
 
@@ -191,9 +258,8 @@ class RockySettings(ChangeNotifier):
             self._save()
             return
         try:
-            data = RockySettingsData.model_validate_json(
-                path.read_text(encoding="utf-8")
-            )
+            settings_object = json.loads(path.read_text(encoding="utf-8"))
+            data = RockySettingsData.model_validate(settings_object, extra="forbid")
         except (json.JSONDecodeError, ValidationError) as exc:
             logger.warning("Failed to parse %s: %s", path, exc)
             data = RockySettingsData()
@@ -214,6 +280,13 @@ class RockySettings(ChangeNotifier):
         self._chats = data.chats
         self._profiles = list(data.models)
         self._selected_profile_id = selected
+        self._shells = list(data.shells)
+        shell_ids = {shell.id for shell in self._shells}
+        self._selected_shell_ids = [
+            selected_id
+            for selected_id in data.selected_shell_ids
+            if selected_id in shell_ids
+        ]
 
     def _save(self) -> None:
         data = RockySettingsData(
@@ -221,6 +294,8 @@ class RockySettings(ChangeNotifier):
             chats=self._chats,
             models=list(self._profiles),
             selected_model_id=self._selected_profile_id,
+            shells=list(self._shells),
+            selected_shell_ids=list(self._selected_shell_ids),
         )
         self._path().write_text(data.model_dump_json(indent=2), encoding="utf-8")
 

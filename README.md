@@ -14,7 +14,8 @@ Rocky has no intention of competing with business-oriented products. Instead, it
 
 ## Agent Features
 
-Coming soon.
+- Multiple shell environments: Connect to various shell environments to complete user tasks or control them on behalf of the user.
+- More are coming soon.
 
 ## Usage
 
@@ -53,6 +54,18 @@ pip install litert-lm
 
 - **macOS** and **Linux**: supported.
 - **Windows**: pending, blocked by upstream LiteRT-LM Windows support.
+
+## Shell Environments
+
+Rocky can connect to a Docker container, a WSL distribution, a remote machine and more. Add an environment in Settings, choose it from the chat header, and Rocky can use it when the selected model supports tools.
+
+Supported environment types:
+
+- **Docker**: run commands inside a local Docker container.
+- **SSH**: run commands on a remote host over SSH.
+- **WSL**: run commands inside a local WSL distribution.
+- **Docker in WSL**: run Docker commands through a WSL distribution.
+- **Docker over SSH**: run Docker commands on a remote host over SSH.
 
 ## License
 

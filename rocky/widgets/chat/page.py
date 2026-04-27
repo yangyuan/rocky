@@ -10,6 +10,7 @@ from flut.flutter.material import (
     PopupMenuButton,
     PopupMenuItem,
     Theme,
+    Tooltip,
 )
 from flut.flutter.painting import (
     Border,
@@ -19,6 +20,7 @@ from flut.flutter.painting import (
     TextStyle,
 )
 from flut.flutter.rendering import CrossAxisAlignment, MainAxisAlignment, MainAxisSize
+from flut.flutter.rendering.box import BoxConstraints
 from flut.flutter.widgets import (
     Column,
     Container,
@@ -33,14 +35,19 @@ from flut.flutter.widgets import (
 )
 
 from rocky.contracts.agent import RockyAgentStatus
+from rocky.contracts.model import RockyModelCapabilityName, RockyModelProviderName
+from rocky.models.capabilities import RockyModelCapabilities
 from rocky.models.templates import RockyModelTemplates
 from rocky.system import RockySystem
 from rocky.widgets.chat.composer import RockyChatComposer
 from rocky.widgets.chat.messages import RockyChatMessageList
+from rocky.widgets.settings.shells.type_picker import RockyShellTemplates
 
 
 class RockyChatHeader(StatelessWidget):
     _MENU_ITEM_MODEL_MANAGE = "__manage__"
+    _MENU_ITEM_SHELL_MANAGE = "__manage_shell__"
+    _MENU_WIDTH = 200
 
     def __init__(
         self,
@@ -48,14 +55,22 @@ class RockyChatHeader(StatelessWidget):
         profiles,
         selected_profile_id,
         on_select_profile,
+        shells,
+        selected_shell_ids,
+        on_set_shell_selected,
         on_open_model_manager,
+        on_open_shell_manager,
         key=None,
     ):
         super().__init__(key=key)
         self.profiles = profiles or []
         self.selected_profile_id = selected_profile_id
         self.on_select_profile = on_select_profile
+        self.shells = shells or []
+        self.selected_shell_ids = selected_shell_ids or []
+        self.on_set_shell_selected = on_set_shell_selected
         self.on_open_model_manager = on_open_model_manager
+        self.on_open_shell_manager = on_open_shell_manager
 
     def _selected_label(self):
         for profile in self.profiles:
@@ -63,18 +78,55 @@ class RockyChatHeader(StatelessWidget):
                 return profile.display_name or "Untitled model"
         return "No model"
 
+    def _environment_label(self):
+        if not self.shells:
+            return "No environments"
+        selected = self._selected_shells()
+        count = len(selected)
+        if count == 0:
+            return "No environment selected"
+        if count == 1:
+            return selected[0].display_name or "Untitled environment"
+        return f"{count} environments"
+
+    def _selected_shells(self):
+        selected_ids = set(self.selected_shell_ids)
+        return [shell for shell in self.shells if shell.id in selected_ids]
+
+    def _selected_profile(self):
+        for profile in self.profiles:
+            if profile.id == self.selected_profile_id:
+                return profile
+        return None
+
+    def _shell_disabled_reason(self) -> str | None:
+        profile = self._selected_profile()
+        if profile is None:
+            return "Select a model to use environments."
+        if not RockyModelCapabilities.supports_function(profile):
+            label = RockyModelCapabilities.label(RockyModelCapabilityName.FUNCTION)
+            return f"Environment requires model's {label} capability."
+        return None
+
     def _on_selected(self, context, value):
         if value == self._MENU_ITEM_MODEL_MANAGE:
             self.on_open_model_manager()
             return
         self.on_select_profile(value)
 
+    def _on_shell_selected(self, context, value):
+        if value == self._MENU_ITEM_SHELL_MANAGE:
+            self.on_open_shell_manager()
+            return
+        selected = value in self.selected_shell_ids
+        self.on_set_shell_selected(value, not selected)
+
     @staticmethod
     def _profile_model_text(profile) -> str:
         name = (profile.name or "").strip()
         if not name:
             return "(no model)"
-        if profile.provider == "litertlm":
+        if profile.provider == RockyModelProviderName.LITERTLM:
             return os.path.basename(name) or name
         return name
 
@@ -82,7 +134,8 @@ class RockyChatHeader(StatelessWidget):
         provider_label = RockyModelTemplates.label(profile.provider)
         is_active = profile.id == self.selected_profile_id
         is_disabled = (
-            profile.provider == "litertlm" and not RockySystem.is_litert_lm_installed()
+            profile.provider == RockyModelProviderName.LITERTLM
+            and not RockySystem.is_litert_lm_installed()
         )
         model_text = self._profile_model_text(profile)
         title_color = (
@@ -175,9 +228,106 @@ class RockyChatHeader(StatelessWidget):
         )
         return items
 
-    def build(self, context):
+    def _shell_menu_item(self, color_scheme, shell):
+        is_selected = shell.id in self.selected_shell_ids
+        type_label = RockyShellTemplates.label(shell.shell_type)
+        target = RockyShellTemplates.target(shell)
+        subtitle = f"{type_label} - {target}" if target else type_label
+        return PopupMenuItem(
+            value=shell.id,
+            height=44,
+            child=Row(
+                mainAxisSize=MainAxisSize.max,
+                children=[
+                    Icon(
+                        Icons.check if is_selected else Icons.circle,
+                        size=14,
+                        color=(
+                            color_scheme.primary if is_selected else Colors.transparent
+                        ),
+                    ),
+                    SizedBox(width=8),
+                    Expanded(
+                        child=Column(
+                            crossAxisAlignment=CrossAxisAlignment.start,
+                            children=[
+                                Text(
+                                    shell.display_name or "Untitled environment",
+                                    style=TextStyle(
+                                        fontSize=13,
+                                        fontWeight=FontWeight.w600,
+                                        color=color_scheme.onSurface,
+                                    ),
+                                ),
+                                Text(
+                                    subtitle,
+                                    style=TextStyle(
+                                        fontSize=11,
+                                        color=color_scheme.onSurfaceVariant,
+                                    ),
+                                ),
+                            ],
+                        ),
+                    ),
+                ],
+            ),
+        )
+
+    def _shell_item_builder(self, context):
         color_scheme = Theme.of(context).colorScheme
-        label = self._selected_label()
+        items = [self._shell_menu_item(color_scheme, shell) for shell in self.shells]
+        if items:
+            items.append(
+                PopupMenuItem(
+                    value=None,
+                    enabled=False,
+                    height=1,
+                    padding=EdgeInsets.all(0),
+                    child=Container(height=1, color=color_scheme.outlineVariant),
+                )
+            )
+        items.append(
+            PopupMenuItem(
+                value=self._MENU_ITEM_SHELL_MANAGE,
+                height=40,
+                child=Row(
+                    mainAxisSize=MainAxisSize.min,
+                    children=[
+                        Icon(
+                            Icons.settings, size=16, color=color_scheme.onSurfaceVariant
+                        ),
+                        SizedBox(width=8),
+                        Text(
+                            "Manage environments\u2026",
+                            style=TextStyle(fontSize=13, color=color_scheme.onSurface),
+                        ),
+                    ],
+                ),
+            )
+        )
+        return items
+
+    def _menu(
+        self,
+        *,
+        context,
+        label,
+        item_builder,
+        on_selected,
+        enabled=True,
+        disabled_tooltip=None,
+    ):
+        color_scheme = Theme.of(context).colorScheme
+        foreground = (
+            color_scheme.onSurface
+            if enabled
+            else color_scheme.onSurface.withOpacity(0.4)
+        )
+        icon_color = (
+            color_scheme.onSurfaceVariant
+            if enabled
+            else color_scheme.onSurfaceVariant.withOpacity(0.45)
+        )
         chip = Container(
             padding=EdgeInsets.fromLTRB(10, 6, 8, 6),
             child=Row(
@@ -188,28 +338,47 @@ class RockyChatHeader(StatelessWidget):
                         style=TextStyle(
                             fontSize=14,
                             fontWeight=FontWeight.w600,
-                            color=color_scheme.onSurface,
+                            color=foreground,
                         ),
                     ),
                     SizedBox(width=4),
-                    Icon(
-                        Icons.expand_more,
-                        size=18,
-                        color=color_scheme.onSurfaceVariant,
-                    ),
+                    Icon(Icons.expand_more, size=18, color=icon_color),
                 ],
             ),
         )
         menu = PopupMenuButton(
-            itemBuilder=self._item_builder,
-            onSelected=lambda v: self._on_selected(context, v),
+            itemBuilder=item_builder,
+            onSelected=on_selected,
             padding=EdgeInsets.all(0),
-            tooltip="Switch model",
+            tooltip="",
+            constraints=BoxConstraints.tightFor(width=self._MENU_WIDTH),
+            enabled=enabled,
             child=chip,
+        )
+        if not enabled and disabled_tooltip:
+            return Tooltip(message=disabled_tooltip, child=menu)
+        return menu
+
+    def build(self, context):
+        model_menu = self._menu(
+            context=context,
+            label=self._selected_label(),
+            item_builder=self._item_builder,
+            on_selected=lambda v: self._on_selected(context, v),
+        )
+        shell_disabled_reason = self._shell_disabled_reason()
+        shells_enabled = shell_disabled_reason is None
+        shell_menu = self._menu(
+            context=context,
+            label=self._environment_label(),
+            item_builder=self._shell_item_builder,
+            on_selected=lambda v: self._on_shell_selected(context, v),
+            enabled=shells_enabled,
+            disabled_tooltip=shell_disabled_reason,
         )
         return Container(
             padding=EdgeInsets.fromLTRB(8, 8, 8, 8),
-            child=Row(children=[menu]),
+            child=Row(children=[model_menu, SizedBox(width=6), shell_menu]),
         )
 
 
@@ -271,7 +440,9 @@ class _ChatSetupPrompt(StatelessWidget):
 _STATUS_MESSAGES = {
     RockyAgentStatus.INITIALIZING: "Initializing model\u2026",
     RockyAgentStatus.SENDING: "Sending\u2026",
+    RockyAgentStatus.THINKING: "Thinking\u2026",
     RockyAgentStatus.RESPONDING: "Responding\u2026",
+    RockyAgentStatus.EXECUTING: "Executing tools\u2026",
 }
 
 
@@ -358,24 +529,32 @@ class RockyChatPage(StatelessWidget):
         profiles,
         selected_profile_id,
         on_select_profile,
+        shells,
+        selected_shell_ids,
+        on_set_shell_selected,
         needs_setup,
         setup_reason,
         settings_ready,
         chat,
         on_send_message,
         on_open_model_manager,
+        on_open_shell_manager,
         key=None,
     ):
         super().__init__(key=key)
         self.profiles = profiles
         self.selected_profile_id = selected_profile_id
         self.on_select_profile = on_select_profile
+        self.shells = shells or []
+        self.selected_shell_ids = selected_shell_ids or []
+        self.on_set_shell_selected = on_set_shell_selected
         self.needs_setup = needs_setup
         self.setup_reason = setup_reason
         self.settings_ready = settings_ready
         self.chat = chat
         self.on_send_message = on_send_message
         self.on_open_model_manager = on_open_model_manager
+        self.on_open_shell_manager = on_open_shell_manager
 
     def _body(self):
         if self.needs_setup:
@@ -401,7 +580,11 @@ class RockyChatPage(StatelessWidget):
                         profiles=self.profiles,
                         selected_profile_id=self.selected_profile_id,
                         on_select_profile=self.on_select_profile,
+                        shells=self.shells,
+                        selected_shell_ids=self.selected_shell_ids,
+                        on_set_shell_selected=self.on_set_shell_selected,
                         on_open_model_manager=self.on_open_model_manager,
+                        on_open_shell_manager=self.on_open_shell_manager,
                     ),
                     Expanded(child=self._body()),
                     RockyChatComposer(

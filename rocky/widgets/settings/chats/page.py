@@ -133,9 +133,7 @@ class _RockySettingsChatsPageState(State[RockySettingsChatsPage]):
                 ),
                 SizedBox(height=4),
                 Text(
-                    "Set how many chats Rocky keeps. Once you go over the "
-                    "limit, the chats you haven't opened in the longest time "
-                    "are deleted first.",
+                    "Set how many chats to keep. Once you go over the limit, the chats you haven't used in the longest time are deleted.",
                     style=TextStyle(fontSize=12, color=color_scheme.onSurfaceVariant),
                 ),
                 SizedBox(height=16),
