@@ -19,6 +19,7 @@ from rocky.contracts.chat import (
     RockyChatData,
     RockyChatMessage,
     RockyChatMetadata,
+    RockyToolCall,
 )
 from rocky.system import RockySystem
 from flut.flutter.foundation.change_notifier import ChangeNotifier
@@ -119,7 +120,8 @@ class RockyChat(ChangeNotifier):
                 [
                     message
                     for message in self._messages
-                    if message.role in ("user", "assistant") and not message.streaming
+                    if message.role in ("user", "assistant", "system", "developer")
+                    and not message.streaming
                 ]
             )
 
@@ -200,7 +202,11 @@ class RockyChat(ChangeNotifier):
             logger.warning("Ignoring send: agent is not configured.")
             return False
         self._messages.append(
-            RockyChatMessage(role="user", content=text, attachments=attachments)
+            RockyChatMessage(
+                role="user",
+                content=text,
+                attachments=attachments,
+            )
         )
         self._metadata = self._metadata.model_copy(update={"updated_at": time.time()})
         if (
@@ -227,6 +233,7 @@ class RockyChat(ChangeNotifier):
                     role=message.role,
                     content=message.content,
                     attachments=list(message.attachments or []),
+                    tool_calls=list(message.tool_calls or []),
                 )
                 for message in self._messages
                 if not message.streaming
@@ -249,7 +256,15 @@ class RockyChat(ChangeNotifier):
                     self._stream_notifier.notifyListeners()
                 elif event.type == RockyAgentStreamEventKind.MESSAGE_BOUNDARY:
                     self._finish_streaming_reply(remove_empty=True)
+                elif event.type == RockyAgentStreamEventKind.DEVELOPER_MESSAGE:
+                    self._append_developer_message(event.message)
+                elif event.type == RockyAgentStreamEventKind.TOOL_STARTED:
+                    self._finish_streaming_reply(remove_empty=True)
+                    self._append_tool_call(event.tool)
+                elif event.type == RockyAgentStreamEventKind.TOOL_FINISHED:
+                    self._update_tool_result(event.tool)
             self._finish_streaming_reply(remove_empty=True)
+            self._finish_tool_message()
         except asyncio.CancelledError:
             cancelled = True
             raise
@@ -261,6 +276,7 @@ class RockyChat(ChangeNotifier):
             if RockySystem.is_shutting_down():
                 return
             self._finish_streaming_reply(remove_empty=True)
+            self._finish_tool_message()
             logger.warning("Chat stream failed: %s", exc)
         finally:
             if not cancelled and not RockySystem.is_shutting_down():
@@ -278,8 +294,76 @@ class RockyChat(ChangeNotifier):
             and self._messages[-1].streaming
         ):
             return self._messages[-1]
-        message = RockyChatMessage(role="assistant", content="", streaming=True)
+        message = RockyChatMessage(
+            role="assistant",
+            content="",
+            streaming=True,
+        )
         self._messages.append(message)
+        self.notifyListeners()
+        return message
+
+    def _append_developer_message(self, message: RockyChatMessage | None) -> None:
+        if message is None or message.role != "developer":
+            return
+        developer_message = message.model_copy(update={"streaming": False})
+        insert_index = len(self._messages)
+        if self._messages and self._messages[-1].role == "user":
+            insert_index -= 1
+        self._messages.insert(insert_index, developer_message)
+        self.notifyListeners()
+
+    def _ensure_tool_message(self) -> RockyChatMessage:
+        if self._messages and self._messages[-1].role == "tool":
+            self._messages[-1].streaming = True
+            return self._messages[-1]
+        message = RockyChatMessage(role="tool", streaming=True)
+        self._messages.append(message)
+        return message
+
+    def _append_tool_call(self, tool: RockyToolCall | None) -> None:
+        if tool is None:
+            return
+        message = self._ensure_tool_message()
+        message.tool_calls.append(tool)
+        self.notifyListeners()
+        self._stream_notifier.notifyListeners()
+
+    def _update_tool_result(self, tool: RockyToolCall | None) -> None:
+        if tool is None:
+            return
+        message = self._ensure_tool_message()
+        target: RockyToolCall | None = None
+        if tool.id:
+            for entry in reversed(message.tool_calls):
+                if entry.id == tool.id:
+                    target = entry
+                    break
+        if target is None:
+            for entry in reversed(message.tool_calls):
+                if not entry.completed:
+                    target = entry
+                    break
+        if target is None:
+            target = RockyToolCall(id=tool.id)
+            message.tool_calls.append(target)
+        target.output = tool.output
+        target.completed = True
+        if all(entry.completed for entry in message.tool_calls):
+            message.streaming = False
+        self.notifyListeners()
+        self._stream_notifier.notifyListeners()
+
+    def _finish_tool_message(self) -> None:
+        if not self._messages or self._messages[-1].role != "tool":
+            return
+        message = self._messages[-1]
+        if not message.tool_calls:
+            self._messages.pop()
+        else:
+            for entry in message.tool_calls:
+                entry.completed = True
+            message.streaming = False
         self.notifyListeners()
         return message
 

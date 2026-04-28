@@ -15,11 +15,20 @@ class RockyAttachment(BaseModel):
     data: str
 
 
+class RockyToolCall(BaseModel):
+    id: str = ""
+    name: str = "tool"
+    arguments: object = None
+    output: object = None
+    completed: bool = False
+
+
 class RockyChatMessage(BaseModel):
-    role: Literal["user", "assistant", "system"]
+    role: Literal["user", "assistant", "system", "developer", "tool"]
     content: str = ""
     streaming: bool = False
     attachments: list[RockyAttachment] = Field(default_factory=list)
+    tool_calls: list[RockyToolCall] = Field(default_factory=list)
 
 
 class RockyChatMetadata(BaseModel):

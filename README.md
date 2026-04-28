@@ -14,7 +14,8 @@ Rocky has no intention of competing with business-oriented products. Instead, it
 
 ## Agent Features
 
-- Multiple shell environments: Connect to various shell environments to complete user tasks or control them on behalf of the user.
+- Multiple shell environments: Connect to various shell environments to complete user tasks or control them on behalf of the user. Explorer can be used to browse and manage the shell environments.
+- Web search: Search the web, open pages, and find text within fetched pages using `ddgs` package.
 - More are coming soon.
 
 ## Usage

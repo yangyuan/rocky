@@ -1,3 +1,5 @@
+import json
+
 from flut.dart.ui import FontWeight
 from flut.flutter.foundation.key import ValueKey
 from flut.flutter.material import (
@@ -16,15 +18,18 @@ from flut.flutter.painting import (
     TextStyle,
 )
 from flut.flutter.rendering import CrossAxisAlignment, MainAxisAlignment
+from flut.flutter.rendering.box import BoxConstraints
 from flut.flutter.scheduler import SchedulerBinding
 from flut.flutter.widgets import (
     Column,
+    ConstrainedBox,
     Container,
     Flexible,
     Icon,
     ListView,
     Row,
     ScrollController,
+    SingleChildScrollView,
     SizedBox,
     State,
     StatefulWidget,
@@ -32,11 +37,17 @@ from flut.flutter.widgets import (
     Text,
 )
 
+from rocky.contracts.chat import (
+    RockyChatMessage,
+    RockyToolCall,
+)
+from rocky.system import RockySystem
 from rocky.widgets.chat.attachments import RockyAttachmentBubbleStrip
 from rocky.widgets.rendering.markdown import RockyMarkdown
 
 CHAT_FONT_SIZE = 14
 METADATA_FONT_SIZE = 12
+TOOL_CONTENT_MAX_HEIGHT = 180
 
 
 class _BubbleUpgradeQueue:
@@ -112,7 +123,14 @@ class RockyChatBubbleFrame(StatelessWidget):
     USER_LABEL = "You"
     ASSISTANT_LABEL = "Rocky"
 
-    def __init__(self, *, role: str, child, metadata_action=None, key=None):
+    def __init__(
+        self,
+        *,
+        role: str,
+        child,
+        metadata_action=None,
+        key=None,
+    ):
         super().__init__(key=key)
         self.role = role
         self.child = child
@@ -195,7 +213,14 @@ class RockyChatBubbleFrame(StatelessWidget):
 
 
 class RockyChatBubble(StatefulWidget):
-    def __init__(self, *, role, content, attachments=(), key=None):
+    def __init__(
+        self,
+        *,
+        role: str,
+        content,
+        attachments=(),
+        key=None,
+    ):
         super().__init__(key=key)
         self.role = role
         self.content = content or ""
@@ -328,6 +353,226 @@ class _RockyAssistantStreamingBubbleState(State[_RockyAssistantStreamingBubble])
         )
 
 
+class RockyExecutedTools(StatefulWidget):
+    def __init__(self, *, message: RockyChatMessage, stream_notifier=None, key=None):
+        super().__init__(key=key)
+        self.message = message
+        self.stream_notifier = stream_notifier
+
+    def createState(self):
+        return _RockyExecutedToolsState()
+
+
+class _RockyExecutedToolsState(State[RockyExecutedTools]):
+    def initState(self):
+        self._expanded = False
+        if self.widget.stream_notifier is not None:
+            self.widget.stream_notifier.addListener(self._on_stream)
+
+    def dispose(self):
+        if self.widget.stream_notifier is not None:
+            self.widget.stream_notifier.removeListener(self._on_stream)
+
+    def didUpdateWidget(self, old_widget):
+        if old_widget.stream_notifier is self.widget.stream_notifier:
+            return
+        if old_widget.stream_notifier is not None:
+            old_widget.stream_notifier.removeListener(self._on_stream)
+        if self.widget.stream_notifier is not None:
+            self.widget.stream_notifier.addListener(self._on_stream)
+
+    def _on_stream(self):
+        self.setState(lambda: None)
+
+    def _toggle(self):
+        def _flip():
+            self._expanded = not self._expanded
+
+        self.setState(_flip)
+
+    def _running(self) -> bool:
+        return any(not tool.completed for tool in self.widget.message.tool_calls)
+
+    def _title(self) -> str:
+        return "Executing Tools" if self._running() else "Executed Tools"
+
+    def _count_label(self) -> str:
+        count = len(self.widget.message.tool_calls)
+        noun = "tool" if count == 1 else "tools"
+        return f"{count} {noun}"
+
+    def _format_value(self, value: object) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, str):
+            return value
+        if isinstance(value, int | float | bool):
+            return str(value)
+        if isinstance(value, dict | list | tuple):
+            try:
+                return json.dumps(value, indent=2, ensure_ascii=False)
+            except TypeError:
+                return str(value)
+        return str(value)
+
+    def _tool_summary(self, tool: RockyToolCall) -> str:
+        if not tool.completed:
+            return "running"
+        return "completed"
+
+    def _tool_content(self, children: list):
+        return ConstrainedBox(
+            constraints=BoxConstraints(maxHeight=TOOL_CONTENT_MAX_HEIGHT),
+            child=SingleChildScrollView(
+                child=Column(
+                    crossAxisAlignment=CrossAxisAlignment.start,
+                    children=children,
+                ),
+            ),
+        )
+
+    def _tool_detail(self, context, tool: RockyToolCall):
+        color_scheme = Theme.of(context).colorScheme
+        label_style = TextStyle(
+            fontSize=METADATA_FONT_SIZE,
+            fontWeight=FontWeight.w600,
+            color=color_scheme.onSurfaceVariant,
+        )
+        body_style = TextStyle(
+            fontSize=METADATA_FONT_SIZE,
+            color=color_scheme.onSurface,
+            fontFamily=RockySystem.monospace_font_family(),
+            fontFamilyFallback=RockySystem.monospace_font_family_fallback(),
+            height=1.35,
+        )
+        children = [
+            Row(
+                children=[
+                    Icon(
+                        Icons.terminal,
+                        size=14,
+                        color=color_scheme.onSurfaceVariant,
+                    ),
+                    SizedBox(width=6),
+                    Flexible(
+                        child=Text(
+                            tool.name,
+                            style=TextStyle(
+                                fontSize=CHAT_FONT_SIZE,
+                                fontWeight=FontWeight.w600,
+                                color=color_scheme.onSurface,
+                            ),
+                        ),
+                    ),
+                    SizedBox(width=8),
+                    Text(self._tool_summary(tool), style=label_style),
+                ],
+            ),
+        ]
+        content_children = []
+        arguments = self._format_value(tool.arguments)
+        if arguments:
+            content_children.append(Text("Arguments", style=label_style))
+            content_children.append(SizedBox(height=2))
+            content_children.append(SelectableText(arguments, style=body_style))
+        output = self._format_value(tool.output)
+        if output:
+            if content_children:
+                content_children.append(SizedBox(height=8))
+            content_children.append(Text("Result", style=label_style))
+            content_children.append(SizedBox(height=2))
+            content_children.append(SelectableText(output, style=body_style))
+        if content_children:
+            children.append(SizedBox(height=6))
+            children.append(self._tool_content(content_children))
+        return Container(
+            margin=EdgeInsets.only(top=8),
+            padding=EdgeInsets.all(10),
+            decoration=BoxDecoration(
+                color=color_scheme.secondaryContainer.withOpacity(0.08),
+                borderRadius=BorderRadius.circular(8),
+                border=Border.all(
+                    width=1,
+                    color=color_scheme.secondary.withOpacity(0.12),
+                ),
+            ),
+            child=Column(
+                crossAxisAlignment=CrossAxisAlignment.start,
+                children=children,
+            ),
+        )
+
+    def build(self, context):
+        color_scheme = Theme.of(context).colorScheme
+        icon_data = Icons.expand_less if self._expanded else Icons.expand_more
+        children = [
+            Material(
+                color=Colors.transparent,
+                child=InkWell(
+                    onTap=self._toggle,
+                    borderRadius=BorderRadius.circular(8),
+                    child=Container(
+                        padding=EdgeInsets.symmetric(horizontal=10, vertical=7),
+                        child=Row(
+                            children=[
+                                Icon(
+                                    Icons.terminal,
+                                    size=16,
+                                    color=color_scheme.onSurfaceVariant,
+                                ),
+                                SizedBox(width=8),
+                                Flexible(
+                                    child=Text(
+                                        self._title(),
+                                        style=TextStyle(
+                                            fontSize=CHAT_FONT_SIZE,
+                                            fontWeight=FontWeight.w600,
+                                            color=color_scheme.onSurface,
+                                        ),
+                                    ),
+                                ),
+                                SizedBox(width=8),
+                                Text(
+                                    self._count_label(),
+                                    style=TextStyle(
+                                        fontSize=METADATA_FONT_SIZE,
+                                        color=color_scheme.onSurfaceVariant,
+                                    ),
+                                ),
+                                SizedBox(width=4),
+                                Icon(
+                                    icon_data,
+                                    size=18,
+                                    color=color_scheme.onSurfaceVariant,
+                                ),
+                            ],
+                        ),
+                    ),
+                ),
+            )
+        ]
+        if self._expanded:
+            for tool in self.widget.message.tool_calls:
+                children.append(self._tool_detail(context, tool))
+
+        return Container(
+            margin=EdgeInsets.only(bottom=12),
+            padding=EdgeInsets.all(4),
+            decoration=BoxDecoration(
+                color=color_scheme.secondaryContainer.withOpacity(0.12),
+                borderRadius=BorderRadius.circular(8),
+                border=Border.all(
+                    width=1,
+                    color=color_scheme.secondary.withOpacity(0.14),
+                ),
+            ),
+            child=Column(
+                crossAxisAlignment=CrossAxisAlignment.start,
+                children=children,
+            ),
+        )
+
+
 class RockyChatMessageList(StatefulWidget):
     def __init__(self, *, chat, key=None):
         super().__init__(key=key)
@@ -430,6 +675,17 @@ class _RockyChatMessageListState(State[RockyChatMessageList]):
 
         children = []
         for index, message in enumerate(messages):
+            if message.role == "developer":
+                continue
+            if message.role == "tool":
+                children.append(
+                    RockyExecutedTools(
+                        message=message,
+                        stream_notifier=stream_notifier,
+                        key=ValueKey(f"chat_tools_{index}"),
+                    )
+                )
+                continue
             if message.streaming and message.role == "assistant":
                 children.append(
                     _RockyAssistantStreamingBubble(

@@ -12,6 +12,7 @@ from rocky.agentic.contracts.tools import ToolCall, ToolDefinition, ToolResult
 from rocky.agentic.tools.shell import ShellTool
 from rocky.agentic.tools.shell_provider import ShellProvider, ShellType
 from rocky.agentic.tools.tool import Tool
+from rocky.agentic.tools.web import WebTool
 from rocky.contracts.shell import RockyShellProfile
 
 logger = logging.getLogger(__name__)
@@ -30,9 +31,12 @@ class RockyToolbox:
     def from_shell_profiles(
         cls,
         profiles: list[RockyShellProfile] | None,
+        include_web: bool = False,
     ) -> "RockyToolbox":
         shells = cls._build_shells(profiles or [])
         tools: list[Tool] = []
+        if include_web:
+            tools.append(WebTool())
         if shells:
             tools.append(ShellTool(shells))
         return cls(tools=tools, shells=shells)

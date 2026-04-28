@@ -9,6 +9,7 @@ class JsonSchema(BaseModel):
     type: Optional[Union[str, List[str]]] = None
     items: Optional[Union["JsonSchema", List["JsonSchema"]]] = None
     anyOf: Optional[List["JsonSchema"]] = None
+    oneOf: Optional[List["JsonSchema"]] = None
     additionalProperties: Optional[Union[bool, "JsonSchema"]] = None
     properties: Optional[Dict[str, "JsonSchema"]] = None
     title: Optional[str] = None
@@ -16,6 +17,7 @@ class JsonSchema(BaseModel):
     default: Optional[Any] = None
     required: Optional[List[str]] = None
     enum: Optional[List[Any]] = None
+    discriminator: Optional[Dict[str, Any]] = None
 
 
 class FunctionDefinition:
