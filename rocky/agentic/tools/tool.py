@@ -32,16 +32,6 @@ class Tool:
     def get_tool_definition(self) -> ToolDefinition:
         raise NotImplementedError(f"Tool {self.name} missing get_tool_definition")
 
-    def get_developer_messages(self) -> List[str]:
-        return []
-
-    def get_post_tool_developer_messages(
-        self,
-        tool_call: ToolCall,
-        tool_result: ToolResult,
-    ) -> List[str]:
-        return []
-
     def register_callback(
         self,
         function_name: str,

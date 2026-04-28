@@ -20,6 +20,7 @@ from flut.flutter.widgets import (
 from rocky.settings import RockySettings
 from rocky.system import RockySystem
 from rocky.widgets.app.theme import RockyTheme
+from rocky.widgets.settings.shells.type_picker import RockyShellTemplates
 
 ROCKY_PROJECT_URL = "https://github.com/yangyuan/rocky"
 
@@ -30,7 +31,8 @@ class RockyAppMenu(StatelessWidget):
         *,
         settings: RockySettings,
         on_new_chat: Callable[[], None],
-        on_open_settings: Callable[[], None],
+        on_open_settings: Callable[..., None],
+        on_open_shell_explorer: Callable[[str], None],
         on_open_about: Callable[[], None],
         on_exit: Callable[[], None],
         key=None,
@@ -39,6 +41,7 @@ class RockyAppMenu(StatelessWidget):
         self.settings = settings
         self.on_new_chat = on_new_chat
         self.on_open_settings = on_open_settings
+        self.on_open_shell_explorer = on_open_shell_explorer
         self.on_open_about = on_open_about
         self.on_exit = on_exit
 
@@ -78,6 +81,23 @@ class RockyAppMenu(StatelessWidget):
             ],
         )
 
+    def _explorer_submenu(self):
+        shell_profiles = self.settings.shell_profiles
+        if not shell_profiles:
+            return None
+        return self._submenu(
+            "Explorer",
+            [
+                self._item(
+                    RockyShellTemplates.display_name(shell_profile),
+                    lambda shell_profile_id=shell_profile.id: self.on_open_shell_explorer(
+                        shell_profile_id
+                    ),
+                )
+                for shell_profile in shell_profiles
+            ],
+        )
+
     def build(self, context):
         self._button_style = ButtonStyle(
             padding=WidgetStateProperty.all(
@@ -86,6 +106,10 @@ class RockyAppMenu(StatelessWidget):
             minimumSize=WidgetStateProperty.all(Size(64, 24)),
         )
         theme = self.settings.theme
+        view_items = [self._item("Runtime Folder", self._open_runtime_folder)]
+        explorer_submenu = self._explorer_submenu()
+        if explorer_submenu is not None:
+            view_items.append(explorer_submenu)
 
         bar = MenuBar(
             children=[
@@ -104,9 +128,7 @@ class RockyAppMenu(StatelessWidget):
                 ),
                 self._submenu(
                     "View",
-                    [
-                        self._item("Runtime Folder", self._open_runtime_folder),
-                    ],
+                    view_items,
                 ),
                 self._submenu(
                     "Window",

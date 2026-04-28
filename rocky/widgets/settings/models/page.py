@@ -42,21 +42,21 @@ class RockySettingsModelsPage(StatefulWidget):
     def __init__(
         self,
         *,
-        profiles,
-        selected_profile_id,
-        on_add_profile,
-        on_update_profile,
-        on_delete_profile,
-        on_select_profile,
+        model_profiles,
+        default_model_profile_id,
+        on_add_model_profile,
+        on_update_model_profile,
+        on_delete_model_profile,
+        on_set_default_model_profile,
         key=None,
     ):
         super().__init__(key=key)
-        self.profiles = profiles
-        self.selected_profile_id = selected_profile_id
-        self.on_add_profile = on_add_profile
-        self.on_update_profile = on_update_profile
-        self.on_delete_profile = on_delete_profile
-        self.on_select_profile = on_select_profile
+        self.model_profiles = model_profiles
+        self.default_model_profile_id = default_model_profile_id
+        self.on_add_model_profile = on_add_model_profile
+        self.on_update_model_profile = on_update_model_profile
+        self.on_delete_model_profile = on_delete_model_profile
+        self.on_set_default_model_profile = on_set_default_model_profile
 
     def createState(self):
         return _RockySettingsModelsPageState()
@@ -64,7 +64,7 @@ class RockySettingsModelsPage(StatefulWidget):
 
 class _RockySettingsModelsPageState(State[RockySettingsModelsPage]):
     def initState(self):
-        if not self.widget.profiles:
+        if not self.widget.model_profiles:
             self._schedule_open_add()
 
     def _schedule_open_add(self):
@@ -77,9 +77,13 @@ class _RockySettingsModelsPageState(State[RockySettingsModelsPage]):
     def _open_add(self):
         self._open_editor(initial=None)
 
-    def _open_edit(self, profile_id: str):
+    def _open_edit(self, model_profile_id: str):
         target = next(
-            (p for p in (self.widget.profiles or []) if p.id == profile_id),
+            (
+                model_profile
+                for model_profile in (self.widget.model_profiles or [])
+                if model_profile.id == model_profile_id
+            ),
             None,
         )
         if target is None:
@@ -100,9 +104,11 @@ class _RockySettingsModelsPageState(State[RockySettingsModelsPage]):
                         width=520,
                         child=RockyModelProfileEditor(
                             initial=initial,
-                            on_save=lambda profile: (
+                            on_save=lambda model_profile: (
                                 Navigator.pop(builder_context),
-                                self._on_save(profile, is_edit=initial is not None),
+                                self._on_save(
+                                    model_profile, is_edit=initial is not None
+                                ),
                             ),
                             on_cancel=lambda: Navigator.pop(builder_context),
                         ),
@@ -128,11 +134,11 @@ class _RockySettingsModelsPageState(State[RockySettingsModelsPage]):
             ),
         )
 
-    def _on_save(self, profile: RockyModelProfile, *, is_edit: bool):
+    def _on_save(self, model_profile: RockyModelProfile, *, is_edit: bool):
         if is_edit:
-            self.widget.on_update_profile(profile)
+            self.widget.on_update_model_profile(model_profile)
         else:
-            self.widget.on_add_profile(profile)
+            self.widget.on_add_model_profile(model_profile)
 
     def _add_button(self, color_scheme):
         radius = BorderRadius.circular(8)
@@ -170,7 +176,7 @@ class _RockySettingsModelsPageState(State[RockySettingsModelsPage]):
 
     def build(self, context):
         color_scheme = Theme.of(context).colorScheme
-        profiles = self.widget.profiles or []
+        model_profiles = self.widget.model_profiles or []
         children = [
             Text(
                 "Models",
@@ -193,12 +199,14 @@ class _RockySettingsModelsPageState(State[RockySettingsModelsPage]):
             SizedBox(height=16),
         ]
 
-        for p in profiles:
+        for model_profile in model_profiles:
             children.append(
                 RockyModelProfileCard(
-                    profile=p,
-                    is_active=(p.id == self.widget.selected_profile_id),
-                    on_select=self.widget.on_select_profile,
+                    profile=model_profile,
+                    is_default=(
+                        model_profile.id == self.widget.default_model_profile_id
+                    ),
+                    on_select=self.widget.on_set_default_model_profile,
                     on_edit=self._open_edit,
                     on_delete=self._confirm_delete,
                 )
@@ -217,9 +225,13 @@ class _RockySettingsModelsPageState(State[RockySettingsModelsPage]):
             children=children,
         )
 
-    def _confirm_delete(self, profile_id: str):
+    def _confirm_delete(self, model_profile_id: str):
         target = next(
-            (p for p in (self.widget.profiles or []) if p.id == profile_id),
+            (
+                model_profile
+                for model_profile in (self.widget.model_profiles or [])
+                if model_profile.id == model_profile_id
+            ),
             None,
         )
         if target is None:
@@ -236,7 +248,7 @@ class _RockySettingsModelsPageState(State[RockySettingsModelsPage]):
                     on_cancel=lambda: Navigator.pop(dialog_context),
                     on_confirm=lambda: (
                         Navigator.pop(dialog_context),
-                        self.widget.on_delete_profile(profile_id),
+                        self.widget.on_delete_model_profile(model_profile_id),
                     ),
                 ),
             ),

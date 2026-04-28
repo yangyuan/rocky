@@ -13,6 +13,27 @@ from rocky.contracts.shell import RockyShellProfile, RockyShellType
 
 
 class RockyShellTemplates:
+    _LABELS: dict[RockyShellType, str] = {
+        "docker": "Docker",
+        "docker_in_wsl": "Docker in WSL",
+        "docker_over_ssh": "Docker over SSH",
+        "ssh": "SSH",
+        "wsl": "WSL",
+    }
+
+    _NAME_TYPES: tuple[RockyShellType, ...] = (
+        "docker",
+        "docker_in_wsl",
+        "docker_over_ssh",
+    )
+
+    _HOST_TYPES: tuple[RockyShellType, ...] = (
+        "ssh",
+        "wsl",
+        "docker_over_ssh",
+        "docker_in_wsl",
+    )
+
     @classmethod
     def all(cls) -> list[RockyShellType]:
         return [
@@ -25,22 +46,15 @@ class RockyShellTemplates:
 
     @classmethod
     def label(cls, shell_type: RockyShellType) -> str:
-        labels: dict[RockyShellType, str] = {
-            "docker": "Docker",
-            "docker_in_wsl": "Docker in WSL",
-            "docker_over_ssh": "Docker over SSH",
-            "ssh": "SSH",
-            "wsl": "WSL",
-        }
-        return labels[shell_type]
+        return cls._LABELS[shell_type]
 
     @classmethod
     def requires_name(cls, shell_type: RockyShellType) -> bool:
-        return shell_type in ("docker", "docker_in_wsl", "docker_over_ssh")
+        return shell_type in cls._NAME_TYPES
 
     @classmethod
     def uses_host(cls, shell_type: RockyShellType) -> bool:
-        return shell_type in ("ssh", "wsl", "docker_over_ssh", "docker_in_wsl")
+        return shell_type in cls._HOST_TYPES
 
     @classmethod
     def requires_host(cls, shell_type: RockyShellType) -> bool:
@@ -60,14 +74,41 @@ class RockyShellTemplates:
 
     @classmethod
     def target(cls, profile: RockyShellProfile) -> str:
-        shell_type = profile.shell_type
-        if cls.requires_name(shell_type) and profile.name:
+        if profile.shell_type in cls._NAME_TYPES and profile.name:
             return profile.name
-        if cls.uses_host(shell_type) and profile.host:
+        if profile.shell_type in cls._HOST_TYPES and profile.host:
             return profile.host
-        if shell_type == "wsl":
-            return ""
-        return "not configured"
+        return ""
+
+    @classmethod
+    def derived_display_name(cls, profile: RockyShellProfile) -> str:
+        return cls.derived_display_name_for(
+            profile.shell_type, profile.name, profile.host
+        )
+
+    @classmethod
+    def derived_display_name_for(
+        cls,
+        shell_type: RockyShellType,
+        name: str,
+        host: str,
+    ) -> str:
+        label = cls._LABELS[shell_type]
+        target = ""
+        if shell_type in cls._NAME_TYPES:
+            target = (name or "").strip()
+        elif shell_type in cls._HOST_TYPES:
+            target = (host or "").strip()
+        if not target:
+            return label
+        return f"{label} {target}"
+
+    @classmethod
+    def display_name(cls, profile: RockyShellProfile) -> str:
+        explicit = (profile.display_name or "").strip()
+        if explicit:
+            return explicit
+        return cls.derived_display_name(profile)
 
 
 class RockyShellTypePicker(StatelessWidget):

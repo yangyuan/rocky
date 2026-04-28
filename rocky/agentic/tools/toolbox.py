@@ -34,7 +34,7 @@ class RockyToolbox:
         shells = cls._build_shells(profiles or [])
         tools: list[Tool] = []
         if shells:
-            tools.append(ShellTool(shells, profiles or []))
+            tools.append(ShellTool(shells))
         return cls(tools=tools, shells=shells)
 
     @classmethod
@@ -105,12 +105,6 @@ class RockyToolbox:
 
     def get_tool_definitions(self) -> list[ToolDefinition]:
         return [tool.get_tool_definition() for tool in self.tools.values()]
-
-    def get_developer_messages(self) -> list[str]:
-        messages: list[str] = []
-        for tool in self.tools.values():
-            messages.extend(tool.get_developer_messages())
-        return messages
 
     async def handle_tool_call(self, tool_call: ToolCall) -> ToolResult:
         tool = self.tools.get(tool_call.namespace)

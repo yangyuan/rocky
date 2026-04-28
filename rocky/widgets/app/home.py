@@ -10,6 +10,7 @@ from rocky.widgets.app.about import RockyAboutDialog
 from rocky.widgets.app.menu import RockyAppMenu
 from rocky.widgets.app.sidebar import RockySidebar
 from rocky.widgets.chat.host import RockyChatHost
+from rocky.widgets.explorer.shell import RockyShellExplorerDialog
 from rocky.widgets.settings.dialog import RockySettingsDialog
 
 
@@ -59,11 +60,19 @@ class RockyHome(StatelessWidget):
             initial_page=initial_page,
         )
         open_about = lambda: self._open_about(context)
+        open_shell_explorer = (
+            lambda shell_profile_id: RockyShellExplorerDialog.open_shell(
+                context,
+                self.settings.shell_profiles,
+                shell_profile_id,
+            )
+        )
 
         menu = RockyAppMenu(
             settings=self.settings,
             on_new_chat=self.chats.new_chat,
             on_open_settings=open_settings,
+            on_open_shell_explorer=open_shell_explorer,
             on_open_about=open_about,
             on_exit=self.on_exit,
         )

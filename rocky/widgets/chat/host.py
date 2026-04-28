@@ -5,6 +5,7 @@ from flut.flutter.widgets import State, StatefulWidget
 from rocky.chats import RockyChats
 from rocky.settings import RockySettings
 from rocky.widgets.chat.page import RockyChatPage
+from rocky.widgets.explorer.shell import RockyShellExplorerDialog
 
 
 class RockyChatHost(StatefulWidget):
@@ -27,40 +28,40 @@ class RockyChatHost(StatefulWidget):
 
 class _RockyChatHostState(State[RockyChatHost]):
     def initState(self):
-        self._current = self.widget.chats.current
-        self.widget.chats.addListener(self._on_chats_changed)
-        self.widget.settings.addListener(self._on_settings_changed)
+        self.widget.chats.addListener(self._on_changed)
+        self.widget.settings.addListener(self._on_changed)
 
     def dispose(self):
-        self.widget.chats.removeListener(self._on_chats_changed)
-        self.widget.settings.removeListener(self._on_settings_changed)
+        self.widget.chats.removeListener(self._on_changed)
+        self.widget.settings.removeListener(self._on_changed)
 
-    def _on_chats_changed(self):
-        new_current = self.widget.chats.current
-        if new_current is self._current:
-            return
-        self._current = new_current
-        self.setState(lambda: None)
-
-    def _on_settings_changed(self):
+    def _on_changed(self):
         self.setState(lambda: None)
 
     def build(self, context):
         settings = self.widget.settings
-        current = self._current
-        settings_ready, settings_reason = settings.chat_ready()
+        chats = self.widget.chats
+        current = chats.current
+        chat_ready, chat_reason = chats.chat_ready(current)
         return RockyChatPage(
-            profiles=settings.profiles,
-            selected_profile_id=settings.selected_profile_id,
-            on_select_profile=settings.select_profile,
-            shells=settings.shells,
-            selected_shell_ids=settings.selected_shell_ids,
-            on_set_shell_selected=settings.set_shell_selected,
-            needs_setup=not settings_ready,
-            setup_reason=settings_reason,
-            settings_ready=settings_ready,
+            model_profiles=settings.model_profiles,
+            selected_model_profile_id=chats.model_profile_id_for(current),
+            on_select_model_profile=current.set_selected_model_profile,
+            shell_profiles=settings.shell_profiles,
+            selected_shell_profile_ids=chats.shell_profile_ids_for(current),
+            on_set_shell_profile_selected=lambda shell_profile_id, selected: chats.toggle_shell_profile(
+                current, shell_profile_id, selected
+            ),
+            needs_setup=not chat_ready,
+            setup_reason=chat_reason,
+            settings_ready=chat_ready,
             chat=current,
             on_send_message=current.send_message,
             on_open_model_manager=lambda: self.widget.on_open_settings("models"),
             on_open_shell_manager=lambda: self.widget.on_open_settings("shells"),
+            on_open_shell_explorer=lambda shell_profile_id: RockyShellExplorerDialog.open_shell(
+                self.context,
+                settings.shell_profiles,
+                shell_profile_id,
+            ),
         )

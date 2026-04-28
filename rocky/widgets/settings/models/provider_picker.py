@@ -1,4 +1,4 @@
-from flut.dart.ui import FontWeight, TextAlign
+from flut.dart.ui import FontWeight, Radius, TextAlign
 from flut.flutter.material import Colors, InkWell, Material, Theme, Tooltip
 from flut.flutter.painting import (
     Border,
@@ -47,10 +47,10 @@ class RockyProviderPicker(StatelessWidget):
             background = Colors.transparent
             foreground = color_scheme.onSurfaceVariant
         radius = BorderRadius(
-            topLeft=8 if is_first else 0,
-            bottomLeft=8 if is_first else 0,
-            topRight=8 if is_last else 0,
-            bottomRight=8 if is_last else 0,
+            topLeft=Radius.circular(8) if is_first else Radius.zero,
+            bottomLeft=Radius.circular(8) if is_first else Radius.zero,
+            topRight=Radius.circular(8) if is_last else Radius.zero,
+            bottomRight=Radius.circular(8) if is_last else Radius.zero,
         )
         segment = Material(
             color=Colors.transparent,

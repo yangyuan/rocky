@@ -29,6 +29,7 @@ from flut.flutter.widgets.navigator import Navigator
 
 from rocky.contracts.shell import RockyShellProfile
 from rocky.widgets.dialog import RockyDialog
+from rocky.widgets.explorer.shell import RockyShellExplorerDialog
 from rocky.widgets.settings.shells.delete_dialog import RockyShellDeleteDialog
 from rocky.widgets.settings.shells.profile import RockyShellProfileCard
 from rocky.widgets.settings.shells.profile_editor import RockyShellProfileEditor
@@ -38,21 +39,23 @@ class RockySettingsShellsPage(StatefulWidget):
     def __init__(
         self,
         *,
-        shells,
-        selected_shell_ids,
-        on_add_shell,
-        on_update_shell,
-        on_delete_shell,
-        on_set_shell_selected,
+        shell_profiles,
+        default_shell_profile_ids,
+        on_add_shell_profile,
+        on_update_shell_profile,
+        on_delete_shell_profile,
+        on_set_default_shell_profile_selected,
         key=None,
     ):
         super().__init__(key=key)
-        self.shells = shells
-        self.selected_shell_ids = selected_shell_ids or []
-        self.on_add_shell = on_add_shell
-        self.on_update_shell = on_update_shell
-        self.on_delete_shell = on_delete_shell
-        self.on_set_shell_selected = on_set_shell_selected
+        self.shell_profiles = shell_profiles
+        self.default_shell_profile_ids = default_shell_profile_ids or []
+        self.on_add_shell_profile = on_add_shell_profile
+        self.on_update_shell_profile = on_update_shell_profile
+        self.on_delete_shell_profile = on_delete_shell_profile
+        self.on_set_default_shell_profile_selected = (
+            on_set_default_shell_profile_selected
+        )
 
     def createState(self):
         return _RockySettingsShellsPageState()
@@ -62,14 +65,18 @@ class _RockySettingsShellsPageState(State[RockySettingsShellsPage]):
     def _open_add(self):
         self._open_editor(initial=None)
 
-    def _open_edit(self, shell_id: str):
-        profile = next(
-            (shell for shell in (self.widget.shells or []) if shell.id == shell_id),
+    def _open_edit(self, shell_profile_id: str):
+        shell_profile = next(
+            (
+                shell_profile
+                for shell_profile in (self.widget.shell_profiles or [])
+                if shell_profile.id == shell_profile_id
+            ),
             None,
         )
-        if profile is None:
+        if shell_profile is None:
             return
-        self._open_editor(initial=profile)
+        self._open_editor(initial=shell_profile)
 
     def _open_editor(self, *, initial: RockyShellProfile | None):
         context = self.context
@@ -115,11 +122,11 @@ class _RockySettingsShellsPageState(State[RockySettingsShellsPage]):
             ),
         )
 
-    def _on_save(self, profile: RockyShellProfile, *, is_edit: bool):
+    def _on_save(self, shell_profile: RockyShellProfile, *, is_edit: bool):
         if is_edit:
-            self.widget.on_update_shell(profile)
+            self.widget.on_update_shell_profile(shell_profile)
         else:
-            self.widget.on_add_shell(profile)
+            self.widget.on_add_shell_profile(shell_profile)
 
     def _add_button(self, color_scheme):
         radius = BorderRadius.circular(8)
@@ -157,7 +164,7 @@ class _RockySettingsShellsPageState(State[RockySettingsShellsPage]):
 
     def build(self, context):
         color_scheme = Theme.of(context).colorScheme
-        shells = self.widget.shells or []
+        shell_profiles = self.widget.shell_profiles or []
         children = [
             Text(
                 "Environments",
@@ -176,12 +183,18 @@ class _RockySettingsShellsPageState(State[RockySettingsShellsPage]):
             ),
             SizedBox(height=16),
         ]
-        for shell in shells:
+        for shell_profile in shell_profiles:
             children.append(
                 RockyShellProfileCard(
-                    profile=shell,
-                    is_selected=shell.id in self.widget.selected_shell_ids,
-                    on_set_selected=self.widget.on_set_shell_selected,
+                    profile=shell_profile,
+                    is_default=shell_profile.id
+                    in self.widget.default_shell_profile_ids,
+                    on_set_default=self.widget.on_set_default_shell_profile_selected,
+                    on_explore=lambda shell_profile_id: RockyShellExplorerDialog.open_shell(
+                        self.context,
+                        self.widget.shell_profiles,
+                        shell_profile_id,
+                    ),
                     on_edit=self._open_edit,
                     on_delete=self._confirm_delete,
                 )
@@ -195,14 +208,18 @@ class _RockySettingsShellsPageState(State[RockySettingsShellsPage]):
         )
         return Column(crossAxisAlignment=CrossAxisAlignment.stretch, children=children)
 
-    def _confirm_delete(self, shell_id: str):
-        profile = next(
-            (shell for shell in (self.widget.shells or []) if shell.id == shell_id),
+    def _confirm_delete(self, shell_profile_id: str):
+        shell_profile = next(
+            (
+                candidate
+                for candidate in (self.widget.shell_profiles or [])
+                if candidate.id == shell_profile_id
+            ),
             None,
         )
-        if profile is None:
+        if shell_profile is None:
             return
-        label = profile.display_name or "this environment"
+        label = shell_profile.display_name or "this environment"
         showDialog(
             context=self.context,
             barrierColor=Colors.grey800.withOpacity(0.8),
@@ -214,7 +231,7 @@ class _RockySettingsShellsPageState(State[RockySettingsShellsPage]):
                     on_cancel=lambda: Navigator.pop(dialog_context),
                     on_confirm=lambda: (
                         Navigator.pop(dialog_context),
-                        self.widget.on_delete_shell(shell_id),
+                        self.widget.on_delete_shell_profile(shell_profile_id),
                     ),
                 ),
             ),

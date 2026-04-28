@@ -48,6 +48,8 @@ class RockyChat(ChangeNotifier):
             Callable[[], Optional[RockyAgentConfig]]
         ] = None
         self._on_message_complete: Callable[["RockyChat"], None] = lambda _chat: None
+        self._on_user_send: Callable[["RockyChat"], None] = lambda _chat: None
+        self._on_persist: Callable[["RockyChat"], None] = lambda _chat: None
         self._stream_notifier = _RockyStreamNotifier()
 
     @property
@@ -104,6 +106,11 @@ class RockyChat(ChangeNotifier):
         self._agent_provider = provider
         self._agent_config_provider = config_provider
 
+    def reconfigure_agent(self) -> None:
+        if self._agent is None or self._agent_config_provider is None:
+            return
+        self._agent.configure(self._agent_config_provider())
+
     def _attach_agent(self, agent: RockyAgent) -> None:
         self._agent = agent
         agent.addListener(self.notifyListeners)
@@ -118,6 +125,42 @@ class RockyChat(ChangeNotifier):
 
     def set_on_message_complete(self, callback: Callable[["RockyChat"], None]) -> None:
         self._on_message_complete = callback
+
+    def set_on_user_send(self, callback: Callable[["RockyChat"], None]) -> None:
+        self._on_user_send = callback
+
+    def set_on_persist(self, callback: Callable[["RockyChat"], None]) -> None:
+        self._on_persist = callback
+
+    @property
+    def selected_model_profile_id(self) -> Optional[str]:
+        return self._metadata.selected_model_id
+
+    @property
+    def selected_shell_profile_ids(self) -> Optional[list[str]]:
+        ids = self._metadata.selected_shell_ids
+        return list(ids) if ids is not None else None
+
+    def set_selected_model_profile(self, model_profile_id: Optional[str]) -> None:
+        if self._metadata.selected_model_id == model_profile_id:
+            return
+        self._metadata = self._metadata.model_copy(
+            update={"selected_model_id": model_profile_id}
+        )
+        self.reconfigure_agent()
+        self.notifyListeners()
+        self._on_persist(self)
+
+    def set_shell_profile_ids(self, shell_profile_ids: list[str]) -> None:
+        new_ids = list(shell_profile_ids)
+        if self._metadata.selected_shell_ids == new_ids:
+            return
+        self._metadata = self._metadata.model_copy(
+            update={"selected_shell_ids": new_ids}
+        )
+        self.reconfigure_agent()
+        self.notifyListeners()
+        self._on_persist(self)
 
     def set_title(self, title: str) -> None:
         cleaned = " ".join(title.strip().split())
@@ -171,6 +214,7 @@ class RockyChat(ChangeNotifier):
                 update={"title": self._derive_title(title_seed)}
             )
         self.notifyListeners()
+        self._on_user_send(self)
         SchedulerBinding.instance.addPostFrameCallback(
             lambda _: asyncio.create_task(self._stream_reply(text, attachments))
         )
@@ -178,7 +222,6 @@ class RockyChat(ChangeNotifier):
 
     def to_data(self) -> RockyChatData:
         return RockyChatData(
-            metadata=self._metadata,
             messages=[
                 RockyChatMessage(
                     role=message.role,

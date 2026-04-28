@@ -15,13 +15,13 @@ RockyShellType = Literal[
 
 class RockyShellProfile(BaseModel):
     id: str
-    display_name: str = "Untitled environment"
+    display_name: str = ""
     shell_type: RockyShellType = "docker"
     name: str = ""
     host: str = ""
     output_max_head_tail: Optional[int] = 20000
 
 
-class RockyShellReference(BaseModel):
+class RockyRuntimeShellEnvironment(BaseModel):
     id: str
     name: str

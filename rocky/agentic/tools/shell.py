@@ -1,5 +1,3 @@
-import json
-
 from rocky.agentic.contracts.message import MessageContentImage
 from rocky.agentic.contracts.tools import (
     FunctionDefinition,
@@ -10,7 +8,6 @@ from rocky.agentic.contracts.tools import (
 )
 from rocky.agentic.tools.shell_provider import ShellProvider
 from rocky.agentic.tools.tool import Tool
-from rocky.contracts.shell import RockyShellProfile, RockyShellReference
 
 SHELL_TOOL_DEFINITION = ToolDefinition(
     name="shell",
@@ -82,38 +79,15 @@ class ShellTool(Tool):
     def __init__(
         self,
         shells: dict[str, ShellProvider],
-        profiles: list[RockyShellProfile],
     ):
         super().__init__("shell")
         self.shells = dict(shells)
-        self.profiles = list(profiles)
         self.register_callback("exec", self.handle_exec)
         self.register_callback("download", self.handle_download)
         self.register_callback("open_image", self.handle_open_image)
 
     def get_tool_definition(self) -> ToolDefinition:
         return SHELL_TOOL_DEFINITION
-
-    def get_developer_messages(self) -> list[str]:
-        shells = [
-            RockyShellReference(
-                id=profile.id,
-                name=profile.display_name or "Untitled environment",
-            )
-            for profile in self.profiles
-            if profile.id in self.shells
-        ]
-        if not shells:
-            return []
-        return [
-            "Available environments for shell tools:\n"
-            + json.dumps(
-                [shell.model_dump() for shell in shells],
-                ensure_ascii=False,
-            )
-            + "\nEvery shell tool call must include one of these IDs as `shell_id`. "
-            + "Do not invent shell IDs."
-        ]
 
     def _shell(self, tool_call: ToolCall) -> ShellProvider | ToolResult:
         if not isinstance(tool_call.arguments, dict):

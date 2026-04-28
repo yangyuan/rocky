@@ -1,4 +1,4 @@
-from flut.dart.ui import FontWeight
+from flut.dart.ui import FontWeight, Radius
 from flut.flutter.material import IconButton, Icons, Theme
 from flut.flutter.painting import (
     Border,
@@ -102,7 +102,8 @@ class RockyDialog(StatelessWidget):
             decoration=BoxDecoration(
                 color=color_scheme.surfaceContainerHigh,
                 borderRadius=BorderRadius(
-                    topLeft=CORNER_RADIUS, topRight=CORNER_RADIUS
+                    topLeft=Radius.circular(CORNER_RADIUS),
+                    topRight=Radius.circular(CORNER_RADIUS),
                 ),
                 border=Border(
                     bottom=BorderSide(width=1, color=color_scheme.outlineVariant)

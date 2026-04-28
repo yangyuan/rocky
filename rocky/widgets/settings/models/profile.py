@@ -29,7 +29,7 @@ class RockyModelProfileCard(StatelessWidget):
         self,
         *,
         profile: RockyModelProfile,
-        is_active: bool,
+        is_default: bool,
         on_select,
         on_edit,
         on_delete,
@@ -37,7 +37,7 @@ class RockyModelProfileCard(StatelessWidget):
     ):
         super().__init__(key=key)
         self.profile = profile
-        self.is_active = is_active
+        self.is_default = is_default
         self.on_select = on_select
         self.on_edit = on_edit
         self.on_delete = on_delete
@@ -76,12 +76,12 @@ class RockyModelProfileCard(StatelessWidget):
                 color_scheme.onSurfaceVariant,
             ),
         ]
-        if self.is_active:
+        if self.is_default:
             badges.extend(
                 [
                     SizedBox(width=6),
                     self._badge(
-                        "Active",
+                        "Default",
                         color_scheme.primary,
                         color_scheme.onPrimary,
                     ),
@@ -165,7 +165,7 @@ class RockyModelProfileCard(StatelessWidget):
                     width=1,
                     color=(
                         color_scheme.primary
-                        if self.is_active
+                        if self.is_default
                         else color_scheme.outlineVariant
                     ),
                 ),

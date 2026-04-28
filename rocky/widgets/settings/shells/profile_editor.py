@@ -87,15 +87,11 @@ class _RockyShellProfileEditorState(State[RockyShellProfileEditor]):
         return self.profile_id is not None
 
     def _derived_display_name(self) -> str:
-        label = RockyShellTemplates.label(self.shell_type)
-        target = ""
-        if RockyShellTemplates.requires_name(self.shell_type):
-            target = (self.name or "").strip()
-        elif RockyShellTemplates.uses_host(self.shell_type):
-            target = (self.host or "").strip()
-        if not target:
-            return label
-        return f"{label} {target}"
+        return RockyShellTemplates.derived_display_name_for(
+            self.shell_type,
+            self.name,
+            self.host,
+        )
 
     def _effective_display_name(self) -> str:
         if self.display_name_overridden:

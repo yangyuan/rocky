@@ -28,16 +28,18 @@ class RockyShellProfileCard(StatelessWidget):
         self,
         *,
         profile: RockyShellProfile,
-        is_selected: bool,
-        on_set_selected,
+        is_default: bool,
+        on_set_default,
+        on_explore,
         on_edit,
         on_delete,
         key=None,
     ):
         super().__init__(key=key)
         self.profile = profile
-        self.is_selected = is_selected
-        self.on_set_selected = on_set_selected
+        self.is_default = is_default
+        self.on_set_default = on_set_default
+        self.on_explore = on_explore
         self.on_edit = on_edit
         self.on_delete = on_delete
 
@@ -70,12 +72,12 @@ class RockyShellProfileCard(StatelessWidget):
                 color_scheme.onSurfaceVariant,
             ),
         ]
-        if self.is_selected:
+        if self.is_default:
             badges.extend(
                 [
                     SizedBox(width=6),
                     self._badge(
-                        "Selected",
+                        "Default",
                         color_scheme.primary,
                         color_scheme.onPrimary,
                     ),
@@ -93,7 +95,7 @@ class RockyShellProfileCard(StatelessWidget):
                                 Row(mainAxisSize=MainAxisSize.min, children=badges),
                                 SizedBox(height=6),
                                 Text(
-                                    profile.display_name or "Untitled environment",
+                                    RockyShellTemplates.display_name(profile),
                                     style=TextStyle(
                                         fontSize=14,
                                         fontWeight=FontWeight.w600,
@@ -115,6 +117,14 @@ class RockyShellProfileCard(StatelessWidget):
                                     else []
                                 ),
                             ],
+                        ),
+                    ),
+                    IconButton(
+                        onPressed=lambda: self.on_explore(profile.id),
+                        icon=Icon(
+                            Icons.folder_open,
+                            size=18,
+                            color=color_scheme.onSurfaceVariant,
                         ),
                     ),
                     IconButton(
@@ -146,7 +156,7 @@ class RockyShellProfileCard(StatelessWidget):
                     width=1,
                     color=(
                         color_scheme.primary
-                        if self.is_selected
+                        if self.is_default
                         else color_scheme.outlineVariant
                     ),
                 ),
@@ -155,9 +165,7 @@ class RockyShellProfileCard(StatelessWidget):
                 color=Colors.transparent,
                 borderRadius=BorderRadius.circular(10),
                 child=InkWell(
-                    onTap=lambda: self.on_set_selected(
-                        profile.id, not self.is_selected
-                    ),
+                    onTap=lambda: self.on_set_default(profile.id, not self.is_default),
                     borderRadius=BorderRadius.circular(10),
                     hoverColor=color_scheme.onSurface.withOpacity(0.04),
                     child=body,

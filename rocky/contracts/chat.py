@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 import uuid
-from typing import Literal
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -28,8 +28,9 @@ class RockyChatMetadata(BaseModel):
     custom_title: bool = False
     created_at: float = Field(default_factory=time.time)
     updated_at: float = Field(default_factory=time.time)
+    selected_model_id: Optional[str] = None
+    selected_shell_ids: Optional[list[str]] = None
 
 
 class RockyChatData(BaseModel):
-    metadata: RockyChatMetadata
     messages: list[RockyChatMessage] = Field(default_factory=list)

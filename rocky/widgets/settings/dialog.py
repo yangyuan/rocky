@@ -159,24 +159,24 @@ class _RockySettingsDialogState(State[RockySettingsDialog]):
         settings = self.widget.settings
         return RockySettingsModelsPage(
             key=ValueKey("settings-models"),
-            profiles=settings.profiles,
-            selected_profile_id=settings.selected_profile_id,
-            on_add_profile=settings.add_profile,
-            on_update_profile=settings.update_profile,
-            on_delete_profile=settings.delete_profile,
-            on_select_profile=settings.select_profile,
+            model_profiles=settings.model_profiles,
+            default_model_profile_id=settings.default_model_profile_id,
+            on_add_model_profile=settings.add_model_profile,
+            on_update_model_profile=settings.update_model_profile,
+            on_delete_model_profile=settings.delete_model_profile,
+            on_set_default_model_profile=settings.set_default_model_profile,
         )
 
     def _shells_body(self):
         settings = self.widget.settings
         return RockySettingsShellsPage(
             key=ValueKey("settings-shells"),
-            shells=settings.shells,
-            selected_shell_ids=settings.selected_shell_ids,
-            on_add_shell=settings.add_shell,
-            on_update_shell=settings.update_shell,
-            on_delete_shell=settings.delete_shell,
-            on_set_shell_selected=settings.set_shell_selected,
+            shell_profiles=settings.shell_profiles,
+            default_shell_profile_ids=settings.default_shell_profile_ids,
+            on_add_shell_profile=settings.add_shell_profile,
+            on_update_shell_profile=settings.update_shell_profile,
+            on_delete_shell_profile=settings.delete_shell_profile,
+            on_set_default_shell_profile_selected=settings.set_default_shell_profile_selected,
         )
 
     def _body(self):

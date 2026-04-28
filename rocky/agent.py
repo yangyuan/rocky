@@ -16,36 +16,49 @@ from rocky.contracts.agent import (
 )
 from rocky.contracts.chat import RockyAttachment, RockyChatMessage
 from rocky.contracts.model import RockyModelProviderName
+from rocky.contracts.internal import RockyRuntimeState
+from rocky.contracts.shell import RockyRuntimeShellEnvironment
 from rocky.agentic.attachments import RockyAttachments
 from rocky.agentic.tools.toolbox import RockyToolbox
 from rocky.models.capabilities import RockyModelCapabilities
+from rocky.prompts.agent import (
+    ROCKY_AGENT_INSTRUCTIONS,
+    ROCKY_TITLE_SUMMARY_INSTRUCTIONS,
+)
+from rocky.prompts.runtime import ROCKY_RUNTIME_DEVELOPER_MESSAGE_TEMPLATE
 from rocky.worker import RockyWorker, RockyWorkerEmitter
 from flut.flutter.foundation.change_notifier import ChangeNotifier
 
 set_tracing_disabled(True)
 
 
-DEFAULT_INSTRUCTIONS = (
-    "You are Rocky, a concise and friendly desktop assistant. "
-    "Answer clearly, format code with Markdown fences, and keep replies tight."
-)
-TITLE_INSTRUCTIONS = (
-    "You write very short chat titles that summarize the conversation. "
-    "Respond with ONLY the title text. No quotes, no trailing punctuation, "
-    "no prefix like 'Title:'. Aim for 5 tokens, never exceed 10 tokens."
-)
 AZURE_API_VERSION = "2024-10-21"
+
+
+class _RockyAgentSession:
+    def __init__(
+        self,
+        inner: Agent,
+        client: AsyncAzureOpenAI | AsyncOpenAI | None = None,
+    ) -> None:
+        self.inner = inner
+        self._client = client
+
+    async def close(self) -> None:
+        if self._client is not None:
+            await self._client.close()
 
 
 class RockyAgent(ChangeNotifier):
     def __init__(self) -> None:
         super().__init__()
         self._config: Optional[RockyAgentConfig] = None
-        self._inner: Optional[Agent] = None
+        self._ready_config: Optional[RockyAgentConfig] = None
         self._toolbox = RockyToolbox.from_shell_profiles([])
         self._input_list: list[dict[str, object]] = []
         self._rebuild_task: Optional[asyncio.Task] = None
         self._status: RockyAgentStatus = RockyAgentStatus.UNCONFIGURED
+        self._last_runtime_fingerprint: Optional[str] = None
 
     @property
     def config(self) -> Optional[RockyAgentConfig]:
@@ -74,7 +87,8 @@ class RockyAgent(ChangeNotifier):
         if config == self._config:
             return
         self._config = config
-        self._inner = None
+        self._ready_config = None
+        self._last_runtime_fingerprint = None
         if self._rebuild_task is not None and not self._rebuild_task.done():
             self._rebuild_task.cancel()
         self._rebuild_task = None
@@ -90,7 +104,7 @@ class RockyAgent(ChangeNotifier):
         )
         self._toolbox = RockyToolbox.from_shell_profiles(shell_profiles)
         self._set_status(RockyAgentStatus.INITIALIZING)
-        self._rebuild_task = asyncio.create_task(self._rebuild(config))
+        self._rebuild_task = asyncio.create_task(self._rebuild(config, self._toolbox))
 
     def set_history(self, messages: list[RockyChatMessage]) -> None:
         self._input_list = [
@@ -107,11 +121,13 @@ class RockyAgent(ChangeNotifier):
     ) -> AsyncIterator[RockyAgentStreamEvent]:
         if self._config is None:
             raise RuntimeError("RockyAgent is not configured.")
+        config = self._config
+        toolbox = self._toolbox
         self._set_status(RockyAgentStatus.SENDING)
-        if self._inner is None and self._rebuild_task is not None:
+        if self._ready_config != config and self._rebuild_task is not None:
             await self._rebuild_task
             self._set_status(RockyAgentStatus.SENDING)
-        if self._inner is None:
+        if self._ready_config != config:
             raise RuntimeError("RockyAgent failed to initialize.")
 
         user_item = self._message_to_input_item(
@@ -121,55 +137,69 @@ class RockyAgent(ChangeNotifier):
                 attachments=list(attachments or []),
             )
         )
-        developer_items = self._developer_input_items()
+        runtime_developer_items = self._runtime_developer_items(config, toolbox)
         if self._input_list:
-            conversation = developer_items + list(self._input_list) + [user_item]
-        elif attachments or developer_items:
-            conversation = developer_items + [user_item]
+            conversation = (
+                runtime_developer_items + list(self._input_list) + [user_item]
+            )
+        elif attachments or runtime_developer_items:
+            conversation = runtime_developer_items + [user_item]
         else:
             conversation = user_text
 
-        inner = self._inner
         next_input: list[dict[str, object]] = []
 
         async def _produce(emit: RockyWorkerEmitter[RockyAgentStreamEvent]) -> None:
-            result = Runner.run_streamed(inner, input=conversation)
-            generation_started = False
-            async for event in result.stream_events():
-                if event.type == "raw_response_event":
-                    if not generation_started:
-                        generation_started = True
-                        emit(
-                            RockyAgentStreamEvent(
-                                RockyAgentStreamEventKind.GENERATION_STARTED
-                            )
-                        )
-                    if isinstance(event.data, ResponseTextDeltaEvent):
-                        delta = event.data.delta
-                        if delta:
+            session = self._build_session(
+                config,
+                ROCKY_AGENT_INSTRUCTIONS,
+                "Rocky",
+                toolbox.as_sdk_tools(),
+            )
+            try:
+                result = Runner.run_streamed(session.inner, input=conversation)
+                generation_started = False
+                async for event in result.stream_events():
+                    if event.type == "raw_response_event":
+                        if not generation_started:
+                            generation_started = True
                             emit(
                                 RockyAgentStreamEvent(
-                                    RockyAgentStreamEventKind.TEXT_DELTA,
-                                    delta=delta,
+                                    RockyAgentStreamEventKind.GENERATION_STARTED
                                 )
                             )
-                elif event.type == "run_item_stream_event":
-                    if event.name == "tool_called":
-                        emit(
-                            RockyAgentStreamEvent(
-                                RockyAgentStreamEventKind.TOOL_STARTED
+                        if isinstance(event.data, ResponseTextDeltaEvent):
+                            delta = event.data.delta
+                            if delta:
+                                emit(
+                                    RockyAgentStreamEvent(
+                                        RockyAgentStreamEventKind.TEXT_DELTA,
+                                        delta=delta,
+                                    )
+                                )
+                    elif event.type == "run_item_stream_event":
+                        if event.name == "tool_called":
+                            emit(
+                                RockyAgentStreamEvent(
+                                    RockyAgentStreamEventKind.TOOL_STARTED
+                                )
                             )
-                        )
-                    elif event.name == "tool_output":
-                        generation_started = False
-                        emit(
-                            RockyAgentStreamEvent(
-                                RockyAgentStreamEventKind.TOOL_FINISHED
+                        elif event.name == "tool_output":
+                            generation_started = False
+                            emit(
+                                RockyAgentStreamEvent(
+                                    RockyAgentStreamEventKind.TOOL_FINISHED
+                                )
                             )
-                        )
-                    elif event.name == "reasoning_item_created":
-                        emit(RockyAgentStreamEvent(RockyAgentStreamEventKind.REASONING))
-            next_input.extend(result.to_input_list())
+                        elif event.name == "reasoning_item_created":
+                            emit(
+                                RockyAgentStreamEvent(
+                                    RockyAgentStreamEventKind.REASONING
+                                )
+                            )
+                next_input.extend(result.to_input_list())
+            finally:
+                await session.close()
 
         try:
             async for event in RockyWorker.stream(_produce):
@@ -215,81 +245,118 @@ class RockyAgent(ChangeNotifier):
             return ""
 
         async def _summarize() -> str:
-            inner = self._build_inner(config, TITLE_INSTRUCTIONS, "Rocky-Title")
-            result = await Runner.run(inner, input=conversation)
-            return str(result.final_output or "").strip()
+            session = self._build_session(
+                config,
+                ROCKY_TITLE_SUMMARY_INSTRUCTIONS,
+                "Rocky-Title-Summary",
+            )
+            try:
+                result = await Runner.run(session.inner, input=conversation)
+                return str(result.final_output or "").strip()
+            finally:
+                await session.close()
 
         return await RockyWorker.run_async(_summarize)
 
-    async def _rebuild(self, config: RockyAgentConfig) -> None:
+    async def _rebuild(
+        self,
+        config: RockyAgentConfig,
+        toolbox: RockyToolbox,
+    ) -> None:
         try:
-            await self._toolbox.initialize()
-            sdk_tools = self._toolbox.as_sdk_tools()
-            inner = await RockyWorker.run(
-                self._build_inner,
-                config,
-                DEFAULT_INSTRUCTIONS,
-                "Rocky",
-                sdk_tools,
-            )
+            await RockyWorker.run_async(toolbox.initialize)
         except asyncio.CancelledError:
             raise
         except Exception:
             if self._config == config:
-                self._inner = None
+                self._ready_config = None
             raise
-        if self._config != config:
+        if self._config != config or self._toolbox is not toolbox:
             return
-        self._inner = inner
+        self._ready_config = config
         self._set_status(RockyAgentStatus.READY)
 
     @staticmethod
-    def _build_inner(
+    def _build_session(
         config: RockyAgentConfig,
         instructions: str,
         name: str,
         tools: list[FunctionTool] | None = None,
-    ) -> Agent:
-        profile = config.model_profile
-        if profile.provider == RockyModelProviderName.LITERTLM:
+    ) -> _RockyAgentSession:
+        model_profile = config.model_profile
+        client: AsyncAzureOpenAI | AsyncOpenAI | None = None
+        if model_profile.provider == RockyModelProviderName.LITERTLM:
             from rocky.models.providers.litertlm import LiteRtLmModel
 
-            path = (profile.name or "").strip()
+            path = (model_profile.name or "").strip()
             if not path:
                 raise ValueError("LiteRT-LM model file path is required.")
             model = LiteRtLmModel(path)
-        elif profile.provider == RockyModelProviderName.AZURE_OPENAI:
-            if not profile.endpoint:
+        elif model_profile.provider == RockyModelProviderName.AZURE_OPENAI:
+            if not model_profile.endpoint:
                 raise ValueError("endpoint is required for azure_openai")
             client = AsyncAzureOpenAI(
-                api_key=profile.key,
-                azure_endpoint=profile.endpoint,
+                api_key=model_profile.key,
+                azure_endpoint=model_profile.endpoint,
                 api_version=AZURE_API_VERSION,
             )
-            backend_model = (profile.deployment or "").strip() or profile.name
+            backend_model = (
+                model_profile.deployment or ""
+            ).strip() or model_profile.name
             model = OpenAIChatCompletionsModel(
                 model=backend_model,
                 openai_client=client,
             )
         else:
-            client = AsyncOpenAI(api_key=profile.key)
+            client = AsyncOpenAI(api_key=model_profile.key)
             model = OpenAIChatCompletionsModel(
-                model=profile.name,
+                model=model_profile.name,
                 openai_client=client,
             )
 
-        return Agent(
-            name=name,
-            instructions=instructions,
-            model=model,
-            tools=list(tools or []),
+        return _RockyAgentSession(
+            Agent(
+                name=name,
+                instructions=instructions,
+                model=model,
+                tools=list(tools or []),
+            ),
+            client,
         )
 
-    def _developer_input_items(self) -> list[dict[str, object]]:
-        return [
-            {"role": "developer", "content": message}
-            for message in self._toolbox.get_developer_messages()
+    def _runtime_state(
+        self,
+        config: Optional[RockyAgentConfig] = None,
+        toolbox: Optional[RockyToolbox] = None,
+    ) -> RockyRuntimeState:
+        config = config or self._config
+        toolbox = toolbox or self._toolbox
+        shell_profiles = list(config.shell_profiles) if config is not None else []
+        active_shell_ids = set(toolbox.shells.keys())
+        environments = [
+            RockyRuntimeShellEnvironment(
+                id=shell_profile.id,
+                name=shell_profile.display_name or shell_profile.shell_type,
+            )
+            for shell_profile in shell_profiles
+            if shell_profile.id in active_shell_ids
         ]
+        return RockyRuntimeState(shell_environments=environments)
+
+    def _runtime_developer_items(
+        self,
+        config: Optional[RockyAgentConfig] = None,
+        toolbox: Optional[RockyToolbox] = None,
+    ) -> list[dict[str, object]]:
+        state = self._runtime_state(config, toolbox)
+        fingerprint = state.fingerprint()
+        if fingerprint == self._last_runtime_fingerprint:
+            return []
+        self._last_runtime_fingerprint = fingerprint
+        body = ROCKY_RUNTIME_DEVELOPER_MESSAGE_TEMPLATE.format(
+            RUNTIME_STATE=state.model_dump_json(indent=2)
+        )
+        return [{"role": "developer", "content": body}]
 
     @staticmethod
     def _message_to_input_item(message: RockyChatMessage) -> dict[str, object]:
