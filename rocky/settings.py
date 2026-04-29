@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from pathlib import Path
 from typing import Optional
 
@@ -21,17 +20,22 @@ from flut.flutter.foundation.change_notifier import ChangeNotifier
 logger = logging.getLogger(__name__)
 
 SETTINGS_FILENAME = "settings.json"
-WORKDIR_ENV = "ROCKY_WORKDIR"
-DEFAULT_WORKDIR_NAME = ".rocky"
-_APP_ROOT = Path(__file__).resolve().parent.parent
+ROCKY_USER_FOLDER_NAME = ".rocky"
+WORKSPACE_HOME_FOLDER_NAME = "workspace"
+ROCKY_RUNTIME_FOLDER = Path(__file__).resolve().parent.parent
 
 
 class RockySettings(ChangeNotifier):
     _instance: Optional["RockySettings"] = None
 
-    def __init__(self, work_dir: Path):
+    def __init__(self):
         super().__init__()
-        self._work_dir = Path(work_dir)
+        self._rocky_runtime_folder = ROCKY_RUNTIME_FOLDER.resolve()
+        self._home_folder = Path("~").expanduser().resolve()
+        self._rocky_user_folder = self._home_folder / ROCKY_USER_FOLDER_NAME
+        self._workspace_home_folder = (
+            self._rocky_user_folder / WORKSPACE_HOME_FOLDER_NAME
+        )
         self._theme = RockyThemeSettings()
         self._chats = RockyChatsSettings()
         self._model_profiles: list[RockyModelProfile] = []
@@ -41,23 +45,10 @@ class RockySettings(ChangeNotifier):
         self._load()
 
     @classmethod
-    def _resolve_work_dir(cls) -> Path:
-        override = os.getenv(WORKDIR_ENV)
-        if override:
-            return Path(override).expanduser().resolve()
-        return (_APP_ROOT / DEFAULT_WORKDIR_NAME).resolve()
-
-    @classmethod
-    def load(cls, work_dir: Optional[Path] = None) -> "RockySettings":
+    def load(cls) -> "RockySettings":
         if cls._instance is not None:
             raise RuntimeError("RockySettings is already loaded.")
-        resolved = (
-            Path(work_dir).resolve()
-            if work_dir is not None
-            else cls._resolve_work_dir()
-        )
-        resolved.mkdir(parents=True, exist_ok=True)
-        cls._instance = cls(resolved)
+        cls._instance = cls()
         return cls._instance
 
     @classmethod
@@ -67,8 +58,20 @@ class RockySettings(ChangeNotifier):
         return cls._instance
 
     @property
-    def work_dir(self) -> Path:
-        return self._work_dir
+    def rocky_runtime_folder(self) -> Path:
+        return self._rocky_runtime_folder
+
+    @property
+    def home_folder(self) -> Path:
+        return self._home_folder
+
+    @property
+    def rocky_user_folder(self) -> Path:
+        return self._rocky_user_folder
+
+    @property
+    def workspace_home_folder(self) -> Path:
+        return self._workspace_home_folder
 
     @property
     def theme(self) -> RockyThemeSettings:
@@ -305,10 +308,11 @@ class RockySettings(ChangeNotifier):
         return None
 
     def _path(self) -> Path:
-        return self._work_dir / SETTINGS_FILENAME
+        return self._rocky_user_folder / SETTINGS_FILENAME
 
     def _load(self) -> None:
-        self._work_dir.mkdir(parents=True, exist_ok=True)
+        self._rocky_user_folder.mkdir(parents=True, exist_ok=True)
+        self._workspace_home_folder.mkdir(parents=True, exist_ok=True)
         path = self._path()
         if not path.exists():
             self._save()
@@ -320,7 +324,7 @@ class RockySettings(ChangeNotifier):
             logger.exception("Failed to parse %s", path)
             data = RockySettingsData()
 
-        default_model_profile_id = data.selected_model_id
+        default_model_profile_id = data.default_model_id
         selectable_ids = {
             model_profile.id
             for model_profile in data.models
@@ -342,7 +346,7 @@ class RockySettings(ChangeNotifier):
         shell_profile_ids = {shell_profile.id for shell_profile in self._shell_profiles}
         self._default_shell_profile_ids = [
             default_id
-            for default_id in data.selected_shell_ids
+            for default_id in data.default_shell_ids
             if default_id in shell_profile_ids
         ]
 
@@ -351,9 +355,9 @@ class RockySettings(ChangeNotifier):
             theme=self._theme,
             chats=self._chats,
             models=list(self._model_profiles),
-            selected_model_id=self._default_model_profile_id,
+            default_model_id=self._default_model_profile_id,
             shells=list(self._shell_profiles),
-            selected_shell_ids=list(self._default_shell_profile_ids),
+            default_shell_ids=list(self._default_shell_profile_ids),
         )
         self._path().write_text(data.model_dump_json(indent=2), encoding="utf-8")
 

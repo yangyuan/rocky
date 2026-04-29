@@ -46,7 +46,7 @@ class _RockyChatHostState(State[RockyChatHost]):
         return RockyChatPage(
             model_profiles=settings.model_profiles,
             selected_model_profile_id=chats.model_profile_id_for(current),
-            on_select_model_profile=current.set_selected_model_profile,
+            on_select_model_profile=current.set_model_profile,
             shell_profiles=settings.shell_profiles,
             selected_shell_profile_ids=chats.shell_profile_ids_for(current),
             on_set_shell_profile_selected=lambda shell_profile_id, selected: chats.toggle_shell_profile(

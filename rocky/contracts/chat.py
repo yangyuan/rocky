@@ -37,8 +37,9 @@ class RockyChatMetadata(BaseModel):
     custom_title: bool = False
     created_at: float = Field(default_factory=time.time)
     updated_at: float = Field(default_factory=time.time)
-    selected_model_id: Optional[str] = None
-    selected_shell_ids: Optional[list[str]] = None
+    model_id: Optional[str] = None
+    shell_ids: Optional[list[str]] = None
+    workspace_folder: Optional[str] = None
 
 
 class RockyChatData(BaseModel):

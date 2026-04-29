@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from pathlib import Path
 from typing import Callable, Optional
 
 from flut.flutter.scheduler import SchedulerBinding
@@ -135,19 +136,24 @@ class RockyChat(ChangeNotifier):
         self._on_persist = callback
 
     @property
-    def selected_model_profile_id(self) -> Optional[str]:
-        return self._metadata.selected_model_id
+    def model_profile_id(self) -> Optional[str]:
+        return self._metadata.model_id
 
     @property
-    def selected_shell_profile_ids(self) -> Optional[list[str]]:
-        ids = self._metadata.selected_shell_ids
+    def shell_profile_ids(self) -> Optional[list[str]]:
+        ids = self._metadata.shell_ids
         return list(ids) if ids is not None else None
 
-    def set_selected_model_profile(self, model_profile_id: Optional[str]) -> None:
-        if self._metadata.selected_model_id == model_profile_id:
+    @property
+    def workspace_folder(self) -> Optional[Path]:
+        value = self._metadata.workspace_folder
+        return Path(value) if value is not None else None
+
+    def set_model_profile(self, model_profile_id: Optional[str]) -> None:
+        if self._metadata.model_id == model_profile_id:
             return
         self._metadata = self._metadata.model_copy(
-            update={"selected_model_id": model_profile_id}
+            update={"model_id": model_profile_id}
         )
         self.reconfigure_agent()
         self.notifyListeners()
@@ -155,12 +161,18 @@ class RockyChat(ChangeNotifier):
 
     def set_shell_profile_ids(self, shell_profile_ids: list[str]) -> None:
         new_ids = list(shell_profile_ids)
-        if self._metadata.selected_shell_ids == new_ids:
+        if self._metadata.shell_ids == new_ids:
             return
-        self._metadata = self._metadata.model_copy(
-            update={"selected_shell_ids": new_ids}
-        )
+        self._metadata = self._metadata.model_copy(update={"shell_ids": new_ids})
         self.reconfigure_agent()
+        self.notifyListeners()
+        self._on_persist(self)
+
+    def set_workspace_folder(self, workspace_folder: Path) -> None:
+        value = str(Path(workspace_folder).resolve())
+        if self._metadata.workspace_folder == value:
+            return
+        self._metadata = self._metadata.model_copy(update={"workspace_folder": value})
         self.notifyListeners()
         self._on_persist(self)
 

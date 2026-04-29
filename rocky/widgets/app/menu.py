@@ -1,4 +1,3 @@
-from pathlib import Path
 from typing import Callable
 
 from flut.dart.ui import Size
@@ -60,9 +59,11 @@ class RockyAppMenu(StatelessWidget):
             child=Text(label),
         )
 
-    def _open_runtime_folder(self):
-        runtime_dir = Path(__file__).resolve().parents[3]
-        RockySystem.open_folder(runtime_dir)
+    def _open_rocky_runtime_folder(self):
+        RockySystem.open_folder(self.settings.rocky_runtime_folder)
+
+    def _open_rocky_user_folder(self):
+        RockySystem.open_folder(self.settings.rocky_user_folder)
 
     def _open_project_home(self):
         RockySystem.open_url(ROCKY_PROJECT_URL)
@@ -90,8 +91,10 @@ class RockyAppMenu(StatelessWidget):
             [
                 self._item(
                     RockyShellTemplates.display_name(shell_profile),
-                    lambda shell_profile_id=shell_profile.id: self.on_open_shell_explorer(
-                        shell_profile_id
+                    (
+                        lambda shell_profile_id=shell_profile.id: (
+                            self.on_open_shell_explorer(shell_profile_id)
+                        )
                     ),
                 )
                 for shell_profile in shell_profiles
@@ -106,7 +109,10 @@ class RockyAppMenu(StatelessWidget):
             minimumSize=WidgetStateProperty.all(Size(64, 24)),
         )
         theme = self.settings.theme
-        view_items = [self._item("Runtime Folder", self._open_runtime_folder)]
+        view_items = [
+            self._item("Runtime Folder", self._open_rocky_runtime_folder),
+            self._item("User Folder", self._open_rocky_user_folder),
+        ]
         explorer_submenu = self._explorer_submenu()
         if explorer_submenu is not None:
             view_items.append(explorer_submenu)

@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 from flut.dart.ui import FontWeight, TextAlign
 from flut.flutter.material import (
@@ -11,6 +12,7 @@ from flut.flutter.material import (
     PopupMenuButton,
     PopupMenuItem,
     Theme,
+    TextButton,
     Tooltip,
 )
 from flut.flutter.painting import (
@@ -62,6 +64,7 @@ class RockyChatHeader(StatelessWidget):
         on_open_model_manager,
         on_open_shell_manager,
         on_open_shell_explorer,
+        workspace_folder: Path | None,
         key=None,
     ):
         super().__init__(key=key)
@@ -74,6 +77,7 @@ class RockyChatHeader(StatelessWidget):
         self.on_open_model_manager = on_open_model_manager
         self.on_open_shell_manager = on_open_shell_manager
         self.on_open_shell_explorer = on_open_shell_explorer
+        self.workspace_folder = workspace_folder
 
     def _selected_label(self):
         for model_profile in self.model_profiles:
@@ -384,6 +388,34 @@ class RockyChatHeader(StatelessWidget):
             return Tooltip(message=disabled_tooltip, child=menu)
         return menu
 
+    def _workspace_button(self, context):
+        color_scheme = Theme.of(context).colorScheme
+        workspace_folder = self.workspace_folder
+        on_pressed = (
+            None
+            if workspace_folder is None
+            else lambda folder=workspace_folder: RockySystem.open_folder(folder)
+        )
+        icon_color = (
+            color_scheme.onSurfaceVariant
+            if workspace_folder is not None
+            else color_scheme.onSurfaceVariant.withOpacity(0.35)
+        )
+        return TextButton(
+            onPressed=on_pressed,
+            child=Row(
+                mainAxisSize=MainAxisSize.min,
+                children=[
+                    Icon(Icons.folder_open, size=18, color=icon_color),
+                    SizedBox(width=6),
+                    Text(
+                        "Workspace",
+                        style=TextStyle(fontSize=13, color=icon_color),
+                    ),
+                ],
+            ),
+        )
+
     def build(self, context):
         model_menu = self._menu(
             context=context,
@@ -403,7 +435,15 @@ class RockyChatHeader(StatelessWidget):
         )
         return Container(
             padding=EdgeInsets.fromLTRB(8, 8, 8, 8),
-            child=Row(children=[model_menu, SizedBox(width=6), shell_menu]),
+            child=Row(
+                children=[
+                    model_menu,
+                    SizedBox(width=6),
+                    shell_menu,
+                    Expanded(child=Container()),
+                    self._workspace_button(context),
+                ],
+            ),
         )
 
 
@@ -613,6 +653,7 @@ class RockyChatPage(StatelessWidget):
                         on_open_model_manager=self.on_open_model_manager,
                         on_open_shell_manager=self.on_open_shell_manager,
                         on_open_shell_explorer=self.on_open_shell_explorer,
+                        workspace_folder=self.chat.workspace_folder,
                     ),
                     Expanded(child=self._body()),
                     RockyChatComposer(
