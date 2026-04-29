@@ -44,6 +44,7 @@ from rocky.models.templates import RockyModelTemplates
 from rocky.system import RockySystem
 from rocky.widgets.chat.composer import RockyChatComposer
 from rocky.widgets.chat.messages import RockyChatMessageList
+from rocky.widgets.chat.skills import RockyChatSkillsDialog
 from rocky.widgets.settings.shells.type_picker import RockyShellTemplates
 
 
@@ -61,6 +62,9 @@ class RockyChatHeader(StatelessWidget):
         shell_profiles,
         selected_shell_profile_ids,
         on_set_shell_profile_selected,
+        skills,
+        selected_skill_ids,
+        on_set_skill_selected,
         on_open_model_manager,
         on_open_shell_manager,
         on_open_shell_explorer,
@@ -74,6 +78,9 @@ class RockyChatHeader(StatelessWidget):
         self.shell_profiles = shell_profiles or []
         self.selected_shell_profile_ids = selected_shell_profile_ids or []
         self.on_set_shell_profile_selected = on_set_shell_profile_selected
+        self.skills = skills or []
+        self.selected_skill_ids = selected_skill_ids or []
+        self.on_set_skill_selected = on_set_skill_selected
         self.on_open_model_manager = on_open_model_manager
         self.on_open_shell_manager = on_open_shell_manager
         self.on_open_shell_explorer = on_open_shell_explorer
@@ -416,6 +423,26 @@ class RockyChatHeader(StatelessWidget):
             ),
         )
 
+    def _chat_skills_override_button(self, context):
+        color_scheme = Theme.of(context).colorScheme
+        color = color_scheme.onSurfaceVariant
+        return TextButton(
+            onPressed=lambda: RockyChatSkillsDialog.open(
+                context,
+                skills=self.skills,
+                selected_skill_ids=self.selected_skill_ids,
+                on_set_skill_selected=self.on_set_skill_selected,
+            ),
+            child=Row(
+                mainAxisSize=MainAxisSize.min,
+                children=[
+                    Icon(Icons.extension, size=18, color=color),
+                    SizedBox(width=6),
+                    Text("Skills", style=TextStyle(fontSize=13, color=color)),
+                ],
+            ),
+        )
+
     def build(self, context):
         model_menu = self._menu(
             context=context,
@@ -441,6 +468,8 @@ class RockyChatHeader(StatelessWidget):
                     SizedBox(width=6),
                     shell_menu,
                     Expanded(child=Container()),
+                    self._chat_skills_override_button(context),
+                    SizedBox(width=4),
                     self._workspace_button(context),
                 ],
             ),
@@ -597,6 +626,9 @@ class RockyChatPage(StatelessWidget):
         shell_profiles,
         selected_shell_profile_ids,
         on_set_shell_profile_selected,
+        skills,
+        selected_skill_ids,
+        on_set_skill_selected,
         needs_setup,
         setup_reason,
         settings_ready,
@@ -614,6 +646,9 @@ class RockyChatPage(StatelessWidget):
         self.shell_profiles = shell_profiles or []
         self.selected_shell_profile_ids = selected_shell_profile_ids or []
         self.on_set_shell_profile_selected = on_set_shell_profile_selected
+        self.skills = skills or []
+        self.selected_skill_ids = selected_skill_ids or []
+        self.on_set_skill_selected = on_set_skill_selected
         self.needs_setup = needs_setup
         self.setup_reason = setup_reason
         self.settings_ready = settings_ready
@@ -650,6 +685,9 @@ class RockyChatPage(StatelessWidget):
                         shell_profiles=self.shell_profiles,
                         selected_shell_profile_ids=self.selected_shell_profile_ids,
                         on_set_shell_profile_selected=self.on_set_shell_profile_selected,
+                        skills=self.skills,
+                        selected_skill_ids=self.selected_skill_ids,
+                        on_set_skill_selected=self.on_set_skill_selected,
                         on_open_model_manager=self.on_open_model_manager,
                         on_open_shell_manager=self.on_open_shell_manager,
                         on_open_shell_explorer=self.on_open_shell_explorer,

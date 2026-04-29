@@ -29,6 +29,7 @@ from rocky.settings import RockySettings
 from rocky.widgets.dialog import RockyDialog
 from rocky.widgets.settings.chats.page import RockySettingsChatsPage
 from rocky.widgets.settings.models.page import RockySettingsModelsPage
+from rocky.widgets.settings.skills.page import RockySettingsSkillsPage
 from rocky.widgets.settings.shells.page import RockySettingsShellsPage
 
 
@@ -146,6 +147,12 @@ class _RockySettingsDialogState(State[RockySettingsDialog]):
                         onTap=lambda: self._set_page("shells"),
                     ),
                     _NavigationRow(
+                        icon=Icons.extension,
+                        label="Skills",
+                        is_selected=self.page == "skills",
+                        onTap=lambda: self._set_page("skills"),
+                    ),
+                    _NavigationRow(
                         icon=Icons.chat_bubble_outline,
                         label="Chats",
                         is_selected=self.page == "chats",
@@ -179,6 +186,17 @@ class _RockySettingsDialogState(State[RockySettingsDialog]):
             on_set_default_shell_profile_selected=settings.set_default_shell_profile_selected,
         )
 
+    def _skills_body(self):
+        settings = self.widget.settings
+        return RockySettingsSkillsPage(
+            key=ValueKey("settings-skills"),
+            skills=settings.skills,
+            default_skill_ids=settings.default_skill_ids,
+            system_skills_folder=settings.system_skills_folder,
+            user_skills_folder=settings.user_skills_folder,
+            on_set_default_skill_selected=settings.set_default_skill_selected,
+        )
+
     def _body(self):
         if self.page == "chats":
             return RockySettingsChatsPage(
@@ -188,6 +206,8 @@ class _RockySettingsDialogState(State[RockySettingsDialog]):
             )
         if self.page == "shells":
             return self._shells_body()
+        if self.page == "skills":
+            return self._skills_body()
         return self._models_body()
 
     def build(self, context):

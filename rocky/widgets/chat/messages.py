@@ -425,7 +425,7 @@ class _RockyExecutedToolsState(State[RockyExecutedTools]):
             constraints=BoxConstraints(maxHeight=TOOL_CONTENT_MAX_HEIGHT),
             child=SingleChildScrollView(
                 child=Column(
-                    crossAxisAlignment=CrossAxisAlignment.start,
+                    crossAxisAlignment=CrossAxisAlignment.stretch,
                     children=children,
                 ),
             ),
@@ -497,7 +497,7 @@ class _RockyExecutedToolsState(State[RockyExecutedTools]):
                 ),
             ),
             child=Column(
-                crossAxisAlignment=CrossAxisAlignment.start,
+                crossAxisAlignment=CrossAxisAlignment.stretch,
                 children=children,
             ),
         )
@@ -567,7 +567,7 @@ class _RockyExecutedToolsState(State[RockyExecutedTools]):
                 ),
             ),
             child=Column(
-                crossAxisAlignment=CrossAxisAlignment.start,
+                crossAxisAlignment=CrossAxisAlignment.stretch,
                 children=children,
             ),
         )

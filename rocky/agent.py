@@ -26,7 +26,7 @@ from rocky.contracts.chat import (
 from rocky.contracts.model import RockyModelProviderName
 from rocky.contracts.internal import RockyRuntimeState
 from rocky.contracts.shell import RockyRuntimeShellEnvironment
-from rocky.agentic.attachments import RockyAttachments
+from rocky.services.attachments import RockyAttachments
 from rocky.agentic.tools.toolbox import RockyToolbox
 from rocky.models.capabilities import RockyModelCapabilities
 from rocky.prompts.agent import (
@@ -62,7 +62,7 @@ class RockyAgent(ChangeNotifier):
         super().__init__()
         self._config: Optional[RockyAgentConfig] = None
         self._ready_config: Optional[RockyAgentConfig] = None
-        self._toolbox = RockyToolbox.from_shell_profiles([])
+        self._toolbox = RockyToolbox.from_runtime_resources([])
         self._input_list: list[dict[str, object]] = []
         self._rebuild_task: Optional[asyncio.Task] = None
         self._status: RockyAgentStatus = RockyAgentStatus.UNCONFIGURED
@@ -102,14 +102,15 @@ class RockyAgent(ChangeNotifier):
         self._rebuild_task = None
         if config is None:
             self._input_list = []
-            self._toolbox = RockyToolbox.from_shell_profiles([])
+            self._toolbox = RockyToolbox.from_runtime_resources([])
             self._set_status(RockyAgentStatus.UNCONFIGURED)
             return
         supports_tools = RockyModelCapabilities.supports_function(config.model_profile)
         shell_profiles = config.shell_profiles if supports_tools else []
-        self._toolbox = RockyToolbox.from_shell_profiles(
+        self._toolbox = RockyToolbox.from_runtime_resources(
             shell_profiles,
             include_web=supports_tools,
+            skills=config.skills if supports_tools else [],
         )
         self._set_status(RockyAgentStatus.INITIALIZING)
         self._rebuild_task = asyncio.create_task(self._rebuild(config, self._toolbox))
@@ -410,6 +411,7 @@ class RockyAgent(ChangeNotifier):
         config = config or self._config
         toolbox = toolbox or self._toolbox
         shell_profiles = list(config.shell_profiles) if config is not None else []
+        skills = list(config.skills) if config is not None else []
         active_shell_ids = set(toolbox.shells.keys())
         environments = [
             RockyRuntimeShellEnvironment(
@@ -419,7 +421,7 @@ class RockyAgent(ChangeNotifier):
             for shell_profile in shell_profiles
             if shell_profile.id in active_shell_ids
         ]
-        return RockyRuntimeState(shell_environments=environments)
+        return RockyRuntimeState(shell_environments=environments, skills=skills)
 
     def _runtime_developer_messages(
         self,
@@ -432,7 +434,7 @@ class RockyAgent(ChangeNotifier):
             return []
         self._last_runtime_fingerprint = fingerprint
         body = ROCKY_RUNTIME_DEVELOPER_MESSAGE_TEMPLATE.format(
-            RUNTIME_STATE=state.model_dump_json(indent=2)
+            RUNTIME_STATE=state.model_context_json(indent=2)
         )
         return [RockyChatMessage(role="developer", content=body)]
 

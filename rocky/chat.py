@@ -145,6 +145,11 @@ class RockyChat(ChangeNotifier):
         return list(ids) if ids is not None else None
 
     @property
+    def skill_ids(self) -> Optional[list[str]]:
+        ids = self._metadata.skill_ids
+        return list(ids) if ids is not None else None
+
+    @property
     def workspace_folder(self) -> Optional[Path]:
         value = self._metadata.workspace_folder
         return Path(value) if value is not None else None
@@ -164,6 +169,15 @@ class RockyChat(ChangeNotifier):
         if self._metadata.shell_ids == new_ids:
             return
         self._metadata = self._metadata.model_copy(update={"shell_ids": new_ids})
+        self.reconfigure_agent()
+        self.notifyListeners()
+        self._on_persist(self)
+
+    def set_skill_ids(self, skill_ids: list[str]) -> None:
+        new_ids = list(skill_ids)
+        if self._metadata.skill_ids == new_ids:
+            return
+        self._metadata = self._metadata.model_copy(update={"skill_ids": new_ids})
         self.reconfigure_agent()
         self.notifyListeners()
         self._on_persist(self)

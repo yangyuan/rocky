@@ -25,3 +25,4 @@ class RockySettingsData(BaseModel):
     default_model_id: Optional[str] = None
     shells: list[RockyShellProfile] = Field(default_factory=list)
     default_shell_ids: list[str] = Field(default_factory=list)
+    default_skill_ids: list[str] = Field(default_factory=list)

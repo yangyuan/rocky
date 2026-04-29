@@ -52,6 +52,11 @@ class _RockyChatHostState(State[RockyChatHost]):
             on_set_shell_profile_selected=lambda shell_profile_id, selected: chats.toggle_shell_profile(
                 current, shell_profile_id, selected
             ),
+            skills=settings.skills,
+            selected_skill_ids=chats.skill_ids_for(current),
+            on_set_skill_selected=lambda skill_id, selected: chats.toggle_skill(
+                current, skill_id, selected
+            ),
             needs_setup=not chat_ready,
             setup_reason=chat_reason,
             settings_ready=chat_ready,

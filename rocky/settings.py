@@ -7,6 +7,7 @@ from typing import Optional
 
 from pydantic import ValidationError
 
+from rocky.agentic.contracts.skill import Skill
 from rocky.contracts.model import RockyModelProfile, RockyModelProviderName
 from rocky.contracts.settings import (
     RockyChatsSettings,
@@ -14,6 +15,7 @@ from rocky.contracts.settings import (
     RockyThemeSettings,
 )
 from rocky.contracts.shell import RockyShellProfile
+from rocky.services.skills_discovery import RockySkillsDiscovery
 from rocky.system import RockySystem
 from flut.flutter.foundation.change_notifier import ChangeNotifier
 
@@ -22,6 +24,7 @@ logger = logging.getLogger(__name__)
 SETTINGS_FILENAME = "settings.json"
 ROCKY_USER_FOLDER_NAME = ".rocky"
 WORKSPACE_HOME_FOLDER_NAME = "workspace"
+SKILLS_FOLDER_NAME = "skills"
 ROCKY_RUNTIME_FOLDER = Path(__file__).resolve().parent.parent
 
 
@@ -36,12 +39,16 @@ class RockySettings(ChangeNotifier):
         self._workspace_home_folder = (
             self._rocky_user_folder / WORKSPACE_HOME_FOLDER_NAME
         )
+        self._system_skills_folder = self._rocky_runtime_folder / SKILLS_FOLDER_NAME
+        self._user_skills_folder = self._rocky_user_folder / SKILLS_FOLDER_NAME
         self._theme = RockyThemeSettings()
         self._chats = RockyChatsSettings()
         self._model_profiles: list[RockyModelProfile] = []
         self._default_model_profile_id: Optional[str] = None
         self._shell_profiles: list[RockyShellProfile] = []
         self._default_shell_profile_ids: list[str] = []
+        self._skills: list[Skill] = []
+        self._default_skill_ids: list[str] = []
         self._load()
 
     @classmethod
@@ -72,6 +79,14 @@ class RockySettings(ChangeNotifier):
     @property
     def workspace_home_folder(self) -> Path:
         return self._workspace_home_folder
+
+    @property
+    def system_skills_folder(self) -> Path:
+        return self._system_skills_folder
+
+    @property
+    def user_skills_folder(self) -> Path:
+        return self._user_skills_folder
 
     @property
     def theme(self) -> RockyThemeSettings:
@@ -113,6 +128,18 @@ class RockySettings(ChangeNotifier):
             if shell_profile.id in default_ids
         ]
 
+    @property
+    def skills(self) -> list[Skill]:
+        return list(self._skills)
+
+    @property
+    def default_skill_ids(self) -> list[str]:
+        return list(self._default_skill_ids)
+
+    @property
+    def default_skills(self) -> list[Skill]:
+        return self.find_skills(self._default_skill_ids)
+
     def find_model_profile(
         self, model_profile_id: Optional[str]
     ) -> Optional[RockyModelProfile]:
@@ -135,6 +162,16 @@ class RockySettings(ChangeNotifier):
             shell_profile = index.get(shell_profile_id)
             if shell_profile is not None:
                 result.append(shell_profile)
+        return result
+
+    def find_skills(self, skill_ids: list[str]) -> list[Skill]:
+        wanted = list(skill_ids or [])
+        index = {skill.id: skill for skill in self._skills}
+        result: list[Skill] = []
+        for skill_id in wanted:
+            skill = index.get(skill_id)
+            if skill is not None:
+                result.append(skill)
         return result
 
     def is_model_profile_selectable(self, model_profile: RockyModelProfile) -> bool:
@@ -301,6 +338,26 @@ class RockySettings(ChangeNotifier):
         self._default_shell_profile_ids = default_ids
         self._save_and_notify()
 
+    def set_default_skill_selected(self, skill_id: str, selected: bool) -> None:
+        skill = next(
+            (candidate for candidate in self._skills if candidate.id == skill_id),
+            None,
+        )
+        if skill is None:
+            return
+        default_ids = list(self._default_skill_ids)
+        already_selected = skill_id in default_ids
+        if selected and not already_selected:
+            default_ids.append(skill_id)
+        elif not selected and already_selected:
+            default_ids = [
+                default_id for default_id in default_ids if default_id != skill_id
+            ]
+        else:
+            return
+        self._default_skill_ids = default_ids
+        self._save_and_notify()
+
     def _first_selectable_model_profile_id(self) -> Optional[str]:
         for model_profile in self._model_profiles:
             if self.is_model_profile_selectable(model_profile):
@@ -313,6 +370,12 @@ class RockySettings(ChangeNotifier):
     def _load(self) -> None:
         self._rocky_user_folder.mkdir(parents=True, exist_ok=True)
         self._workspace_home_folder.mkdir(parents=True, exist_ok=True)
+        self._system_skills_folder.mkdir(parents=True, exist_ok=True)
+        self._user_skills_folder.mkdir(parents=True, exist_ok=True)
+        self._skills = RockySkillsDiscovery(
+            system_skills_folder=self._system_skills_folder,
+            user_skills_folder=self._user_skills_folder,
+        ).discover()
         path = self._path()
         if not path.exists():
             self._save()
@@ -349,6 +412,12 @@ class RockySettings(ChangeNotifier):
             for default_id in data.default_shell_ids
             if default_id in shell_profile_ids
         ]
+        skill_ids = {skill.id for skill in self._skills}
+        self._default_skill_ids = [
+            default_id
+            for default_id in data.default_skill_ids
+            if default_id in skill_ids
+        ]
 
     def _save(self) -> None:
         data = RockySettingsData(
@@ -358,6 +427,7 @@ class RockySettings(ChangeNotifier):
             default_model_id=self._default_model_profile_id,
             shells=list(self._shell_profiles),
             default_shell_ids=list(self._default_shell_profile_ids),
+            default_skill_ids=list(self._default_skill_ids),
         )
         self._path().write_text(data.model_dump_json(indent=2), encoding="utf-8")
 

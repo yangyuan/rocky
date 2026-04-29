@@ -126,8 +126,17 @@ class RockyChats(ChangeNotifier):
             ids = self._settings.default_shell_profile_ids
         return self._settings.find_shell_profiles(ids)
 
+    def skills_for(self, chat: RockyChat):
+        ids = chat.skill_ids
+        if ids is None:
+            ids = self._settings.default_skill_ids
+        return self._settings.find_skills(ids)
+
     def shell_profile_ids_for(self, chat: RockyChat) -> list[str]:
         return [shell_profile.id for shell_profile in self.shell_profiles_for(chat)]
+
+    def skill_ids_for(self, chat: RockyChat) -> list[str]:
+        return [skill.id for skill in self.skills_for(chat)]
 
     def model_profile_id_for(self, chat: RockyChat) -> Optional[str]:
         model_profile = self.model_profile_for(chat)
@@ -145,6 +154,17 @@ class RockyChats(ChangeNotifier):
         else:
             return
         chat.set_shell_profile_ids(ids)
+
+    def toggle_skill(self, chat: RockyChat, skill_id: str, selected: bool) -> None:
+        ids = list(self.skill_ids_for(chat))
+        already_selected = skill_id in ids
+        if selected and not already_selected:
+            ids.append(skill_id)
+        elif not selected and already_selected:
+            ids = [item for item in ids if item != skill_id]
+        else:
+            return
+        chat.set_skill_ids(ids)
 
     def chat_ready(self, chat: RockyChat) -> tuple[bool, Optional[str]]:
         return self._settings.model_profile_ready(self.model_profile_for(chat))
@@ -188,6 +208,8 @@ class RockyChats(ChangeNotifier):
             chat.set_model_profile(self.model_profile_id_for(chat))
         if chat.shell_profile_ids is None:
             chat.set_shell_profile_ids(self.shell_profile_ids_for(chat))
+        if chat.skill_ids is None:
+            chat.set_skill_ids(self.skill_ids_for(chat))
 
     def _commit_workspace_folder(self, chat: RockyChat) -> None:
         workspace_folder = chat.workspace_folder
@@ -210,6 +232,7 @@ class RockyChats(ChangeNotifier):
         return RockyAgentConfig(
             model_profile=model_profile,
             shell_profiles=shell_profiles,
+            skills=self.skills_for(chat),
         )
 
     def _apply_settings(self) -> None:

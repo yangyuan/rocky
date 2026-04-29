@@ -28,7 +28,7 @@ from flut.flutter.widgets import (
     Wrap,
 )
 
-from rocky.agentic.attachments import RockyAttachments
+from rocky.services.attachments import RockyAttachments
 from rocky.contracts.chat import RockyAttachment
 from rocky.system import RockySystem
 

@@ -8,9 +8,11 @@ from typing import Any, Optional
 from agents import FunctionTool, ToolOutputImage, ToolOutputText
 
 from rocky.agentic.contracts.message import MessageContentImage, MessageContentText
+from rocky.agentic.contracts.skill import Skill
 from rocky.agentic.contracts.tools import ToolCall, ToolDefinition, ToolResult
 from rocky.agentic.tools.shell import ShellTool
 from rocky.agentic.tools.shell_provider import ShellProvider, ShellType
+from rocky.agentic.tools.skill import SkillTool
 from rocky.agentic.tools.tool import Tool
 from rocky.agentic.tools.web import WebTool
 from rocky.contracts.shell import RockyShellProfile
@@ -28,17 +30,20 @@ class RockyToolbox:
         self.shells = dict(shells or {})
 
     @classmethod
-    def from_shell_profiles(
+    def from_runtime_resources(
         cls,
-        profiles: list[RockyShellProfile] | None,
+        shell_profiles: list[RockyShellProfile] | None,
         include_web: bool = False,
+        skills: list[Skill] | None = None,
     ) -> "RockyToolbox":
-        shells = cls._build_shells(profiles or [])
+        shells = cls._build_shells(shell_profiles or [])
         tools: list[Tool] = []
         if include_web:
             tools.append(WebTool())
         if shells:
             tools.append(ShellTool(shells))
+        if skills:
+            tools.append(SkillTool(skills))
         return cls(tools=tools, shells=shells)
 
     @classmethod
@@ -139,7 +144,7 @@ class RockyToolbox:
 
     @staticmethod
     def _sdk_tool_name(namespace: str, function_name: str) -> str:
-        return f"{namespace}_{function_name}"
+        return f"{namespace}__{function_name}"
 
     @staticmethod
     def _schema_dict(parameters: Any) -> dict[str, Any]:
