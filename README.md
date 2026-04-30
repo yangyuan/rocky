@@ -63,6 +63,7 @@ Rocky can connect to a Docker container, a WSL distribution, a remote machine an
 
 Supported environment types:
 
+- **Local**: run command arrays in the chat workspace on the host OS.
 - **Docker**: run commands inside a local Docker container.
 - **SSH**: run commands on a remote host over SSH.
 - **WSL**: run commands inside a local WSL distribution.

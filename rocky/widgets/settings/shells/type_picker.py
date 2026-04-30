@@ -14,6 +14,7 @@ from rocky.contracts.shell import RockyShellProfile, RockyShellType
 
 class RockyShellTemplates:
     _LABELS: dict[RockyShellType, str] = {
+        "local": "Local",
         "docker": "Docker",
         "docker_in_wsl": "Docker in WSL",
         "docker_over_ssh": "Docker over SSH",

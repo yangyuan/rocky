@@ -1,3 +1,4 @@
+import os
 from typing import Callable
 
 from flut.flutter.widgets import State, StatefulWidget
@@ -68,5 +69,7 @@ class _RockyChatHostState(State[RockyChatHost]):
                 self.context,
                 settings.shell_profiles,
                 shell_profile_id,
+                current.workspace_folder
+                or os.path.join(settings.workspace_home_folder, current.id),
             ),
         )

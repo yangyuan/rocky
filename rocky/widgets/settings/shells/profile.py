@@ -33,6 +33,9 @@ class RockyShellProfileCard(StatelessWidget):
         on_explore,
         on_edit,
         on_delete,
+        can_explore: bool = True,
+        can_edit: bool = True,
+        can_delete: bool = True,
         key=None,
     ):
         super().__init__(key=key)
@@ -42,6 +45,9 @@ class RockyShellProfileCard(StatelessWidget):
         self.on_explore = on_explore
         self.on_edit = on_edit
         self.on_delete = on_delete
+        self.can_explore = can_explore
+        self.can_edit = can_edit
+        self.can_delete = can_delete
 
     def _badge(self, label, background, foreground):
         return Container(
@@ -119,31 +125,49 @@ class RockyShellProfileCard(StatelessWidget):
                             ],
                         ),
                     ),
-                    IconButton(
-                        onPressed=lambda: self.on_explore(profile.id),
-                        icon=Icon(
-                            Icons.folder_open,
-                            size=18,
-                            color=color_scheme.onSurfaceVariant,
-                        ),
+                    *(
+                        [
+                            IconButton(
+                                onPressed=lambda: self.on_explore(profile.id),
+                                icon=Icon(
+                                    Icons.folder_open,
+                                    size=18,
+                                    color=color_scheme.onSurfaceVariant,
+                                ),
+                            )
+                        ]
+                        if self.can_explore
+                        else []
                     ),
-                    IconButton(
-                        onPressed=lambda: self.on_edit(profile.id),
-                        icon=Icon(
-                            Icons.edit_outlined,
-                            size=18,
-                            color=color_scheme.onSurfaceVariant,
-                        ),
-                        tooltip="Edit",
+                    *(
+                        [
+                            IconButton(
+                                onPressed=lambda: self.on_edit(profile.id),
+                                icon=Icon(
+                                    Icons.edit_outlined,
+                                    size=18,
+                                    color=color_scheme.onSurfaceVariant,
+                                ),
+                                tooltip="Edit",
+                            )
+                        ]
+                        if self.can_edit
+                        else []
                     ),
-                    IconButton(
-                        onPressed=lambda: self.on_delete(profile.id),
-                        icon=Icon(
-                            Icons.delete_outline,
-                            size=18,
-                            color=color_scheme.onSurfaceVariant,
-                        ),
-                        tooltip="Delete",
+                    *(
+                        [
+                            IconButton(
+                                onPressed=lambda: self.on_delete(profile.id),
+                                icon=Icon(
+                                    Icons.delete_outline,
+                                    size=18,
+                                    color=color_scheme.onSurfaceVariant,
+                                ),
+                                tooltip="Delete",
+                            )
+                        ]
+                        if self.can_delete
+                        else []
                     ),
                 ],
             ),

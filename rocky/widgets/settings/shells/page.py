@@ -27,7 +27,7 @@ from flut.flutter.widgets import (
 from flut.flutter.widgets.media_query import MediaQuery
 from flut.flutter.widgets.navigator import Navigator
 
-from rocky.contracts.shell import RockyShellProfile
+from rocky.contracts.shell import ROCKY_LOCAL_SHELL_PROFILE_ID, RockyShellProfile
 from rocky.widgets.dialog import RockyDialog
 from rocky.widgets.explorer.shell import RockyShellExplorerDialog
 from rocky.widgets.settings.shells.delete_dialog import RockyShellDeleteDialog
@@ -184,6 +184,7 @@ class _RockySettingsShellsPageState(State[RockySettingsShellsPage]):
             SizedBox(height=16),
         ]
         for shell_profile in shell_profiles:
+            is_local = shell_profile.id == ROCKY_LOCAL_SHELL_PROFILE_ID
             children.append(
                 RockyShellProfileCard(
                     profile=shell_profile,
@@ -197,6 +198,9 @@ class _RockySettingsShellsPageState(State[RockySettingsShellsPage]):
                     ),
                     on_edit=self._open_edit,
                     on_delete=self._confirm_delete,
+                    can_explore=not is_local,
+                    can_edit=not is_local,
+                    can_delete=not is_local,
                 )
             )
         children.append(SizedBox(height=4))

@@ -4,13 +4,19 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel
 
+ROCKY_LOCAL_SHELL_PROFILE_ID = "local"
+
 RockyShellType = Literal[
+    "local",
     "docker",
     "docker_in_wsl",
     "docker_over_ssh",
     "ssh",
     "wsl",
 ]
+
+RockyRuntimeShellKind = Literal["local", "remote"]
+RockyRuntimeShellOS = Literal["windows", "macos", "linux"]
 
 
 class RockyShellProfile(BaseModel):
@@ -25,3 +31,5 @@ class RockyShellProfile(BaseModel):
 class RockyRuntimeShellEnvironment(BaseModel):
     id: str
     name: str
+    kind: RockyRuntimeShellKind = "remote"
+    os: Optional[RockyRuntimeShellOS] = None

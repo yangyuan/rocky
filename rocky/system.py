@@ -55,6 +55,14 @@ class RockySystem:
             return False
 
     @staticmethod
+    def os_display_name() -> str:
+        if sys.platform == "win32":
+            return "Windows"
+        if sys.platform == "darwin":
+            return "macOS"
+        return "Linux"
+
+    @staticmethod
     def monospace_font_family() -> str:
         if sys.platform == "win32":
             return "Consolas"

@@ -1,6 +1,8 @@
 import asyncio
 import os
 import shlex
+import shutil
+from pathlib import Path
 
 from flut.dart import Brightness, Color
 from flut.dart.ui import Clip
@@ -58,9 +60,14 @@ from rocky.widgets.settings.shells.type_picker import RockyShellTemplates
 
 class RockyShellExplorerDialog:
     @classmethod
-    def open(cls, context, profile: RockyShellProfile) -> None:
+    def open(
+        cls,
+        context,
+        profile: RockyShellProfile,
+        local_workdir: str | None = None,
+    ) -> None:
         error = cls.profile_error(profile)
-        provider = None if error else cls.profile_provider(profile)
+        provider = None if error else cls.profile_provider(profile, local_workdir)
         title = RockyShellTemplates.display_name(profile)
         showDialog(
             context=context,
@@ -85,7 +92,13 @@ class RockyShellExplorerDialog:
         )
 
     @classmethod
-    def open_shell(cls, context, shell_profiles, shell_profile_id: str) -> None:
+    def open_shell(
+        cls,
+        context,
+        shell_profiles,
+        shell_profile_id: str,
+        local_workdir: str | None = None,
+    ) -> None:
         shell_profile = next(
             (
                 candidate
@@ -96,16 +109,21 @@ class RockyShellExplorerDialog:
         )
         if shell_profile is None:
             return
-        cls.open(context, shell_profile)
+        cls.open(context, shell_profile, local_workdir)
 
     @classmethod
-    def profile_provider(cls, profile: RockyShellProfile) -> ShellProvider | None:
+    def profile_provider(
+        cls,
+        profile: RockyShellProfile,
+        local_workdir: str | None = None,
+    ) -> ShellProvider | None:
         if cls.profile_error(profile):
             return None
         return ShellProvider(
             profile.name,
             ShellType(profile.shell_type),
             shell_host=profile.host or None,
+            local_workdir=local_workdir,
             output_max_head_tail=profile.output_max_head_tail,
         )
 
@@ -175,6 +193,12 @@ class _RockyShellExplorerState(State[RockyShellExplorer]):
 
     @staticmethod
     def _get_working_directory(provider: ShellProvider) -> str:
+        if provider.is_local:
+            base = (
+                Path(provider.local_workdir) if provider.local_workdir else Path.cwd()
+            )
+            path = base.resolve().as_posix()
+            return path if path.endswith("/") else path + "/"
         result = provider.subprocess_exec(["pwd"])
         if result.returncode != 0:
             stderr = result.stderr.strip() if result.stderr else "unknown error"
@@ -188,6 +212,18 @@ class _RockyShellExplorerState(State[RockyShellExplorer]):
     def _list_directory(
         provider: ShellProvider, path: str
     ) -> tuple[list[str], list[str]]:
+        if provider.is_local:
+            local_path = Path(path)
+            directories: list[str] = []
+            files: list[str] = []
+            for child in local_path.iterdir():
+                if child.is_dir():
+                    directories.append(child.name + "/")
+                else:
+                    files.append(child.name)
+            directories.sort()
+            files.sort()
+            return directories, files
         result = provider.subprocess_exec(
             ["sh", "-c", f"ls -1pa {shlex.quote(path)} 2>&1"]
         )
@@ -214,6 +250,9 @@ class _RockyShellExplorerState(State[RockyShellExplorer]):
 
     @staticmethod
     def _delete_file(provider: ShellProvider, path: str) -> None:
+        if provider.is_local:
+            Path(path).unlink(missing_ok=True)
+            return
         result = provider.subprocess_exec(["rm", "-f", "--", path])
         if result.returncode != 0:
             output = (result.stderr or result.stdout or "").strip()
@@ -221,6 +260,9 @@ class _RockyShellExplorerState(State[RockyShellExplorer]):
 
     @staticmethod
     def _delete_directory(provider: ShellProvider, path: str) -> None:
+        if provider.is_local:
+            shutil.rmtree(path, ignore_errors=True)
+            return
         result = provider.subprocess_exec(["rm", "-rf", "--", path])
         if result.returncode != 0:
             output = (result.stderr or result.stdout or "").strip()

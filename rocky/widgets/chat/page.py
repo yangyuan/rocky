@@ -1,5 +1,4 @@
 import os
-from pathlib import Path
 
 from flut.dart.ui import FontWeight, TextAlign
 from flut.flutter.material import (
@@ -68,7 +67,7 @@ class RockyChatHeader(StatelessWidget):
         on_open_model_manager,
         on_open_shell_manager,
         on_open_shell_explorer,
-        workspace_folder: Path | None,
+        workspace_folder: str | None,
         key=None,
     ):
         super().__init__(key=key)

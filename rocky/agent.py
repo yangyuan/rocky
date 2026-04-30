@@ -28,6 +28,7 @@ from rocky.contracts.internal import RockyRuntimeState
 from rocky.contracts.shell import RockyRuntimeShellEnvironment
 from rocky.services.attachments import RockyAttachments
 from rocky.agentic.tools.toolbox import RockyToolbox
+from rocky.agentic.tools.shell_provider import ShellProvider, ShellType
 from rocky.models.capabilities import RockyModelCapabilities
 from rocky.prompts.agent import (
     ROCKY_AGENT_INSTRUCTIONS,
@@ -111,6 +112,7 @@ class RockyAgent(ChangeNotifier):
             shell_profiles,
             include_web=supports_tools,
             skills=config.skills if supports_tools else [],
+            workspace_folder=config.workspace_folder,
         )
         self._set_status(RockyAgentStatus.INITIALIZING)
         self._rebuild_task = asyncio.create_task(self._rebuild(config, self._toolbox))
@@ -417,6 +419,16 @@ class RockyAgent(ChangeNotifier):
             RockyRuntimeShellEnvironment(
                 id=shell_profile.id,
                 name=shell_profile.display_name or shell_profile.shell_type,
+                kind=(
+                    "local"
+                    if shell_profile.shell_type == ShellType.LOCAL.value
+                    else "remote"
+                ),
+                os=(
+                    ShellProvider.local_os()
+                    if shell_profile.shell_type == ShellType.LOCAL.value
+                    else None
+                ),
             )
             for shell_profile in shell_profiles
             if shell_profile.id in active_shell_ids

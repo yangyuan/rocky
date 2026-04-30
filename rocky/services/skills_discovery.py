@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 
 class RockySkillsDiscovery:
-    def __init__(self, *, system_skills_folder: Path, user_skills_folder: Path):
+    def __init__(self, *, system_skills_folder: str, user_skills_folder: str):
         self._system_skills_folder = system_skills_folder
         self._user_skills_folder = user_skills_folder
 
@@ -20,17 +20,20 @@ class RockySkillsDiscovery:
             *self._discover_folder(self._user_skills_folder, SkillSource.USER),
         ]
 
-    def _discover_folder(self, folder: Path, source: SkillSource) -> list[Skill]:
-        if not folder.exists():
+    def _discover_folder(self, folder: str, source: SkillSource) -> list[Skill]:
+        folder_path = Path(folder)
+        if not folder_path.exists():
             return []
-        if not folder.is_dir():
-            logger.error("Skill folder is not a directory: %s", folder)
+        if not folder_path.is_dir():
+            logger.error("Skill folder is not a directory: %s", folder_path)
             return []
         skill_folders = {
-            child.name.casefold() for child in folder.iterdir() if child.is_dir()
+            child.name.casefold() for child in folder_path.iterdir() if child.is_dir()
         }
         skills: list[Skill] = []
-        for skill_path in sorted(folder.iterdir(), key=lambda item: item.name.lower()):
+        for skill_path in sorted(
+            folder_path.iterdir(), key=lambda item: item.name.lower()
+        ):
             if skill_path.is_dir():
                 skill = SkillProvider(
                     skill_path=str(skill_path), source=source

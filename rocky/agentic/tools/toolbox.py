@@ -35,8 +35,9 @@ class RockyToolbox:
         shell_profiles: list[RockyShellProfile] | None,
         include_web: bool = False,
         skills: list[Skill] | None = None,
+        workspace_folder: str | None = None,
     ) -> "RockyToolbox":
-        shells = cls._build_shells(shell_profiles or [])
+        shells = cls._build_shells(shell_profiles or [], workspace_folder)
         tools: list[Tool] = []
         if include_web:
             tools.append(WebTool())
@@ -50,10 +51,11 @@ class RockyToolbox:
     def _build_shells(
         cls,
         profiles: list[RockyShellProfile],
+        workspace_folder: str | None = None,
     ) -> dict[str, ShellProvider]:
         shells: dict[str, ShellProvider] = {}
         for profile in profiles:
-            shell = cls._build_shell(profile)
+            shell = cls._build_shell(profile, workspace_folder)
             if shell is not None:
                 shells[profile.id] = shell
         return shells
@@ -61,6 +63,7 @@ class RockyToolbox:
     @staticmethod
     def _build_shell(
         profile: RockyShellProfile | None,
+        workspace_folder: str | None = None,
     ) -> Optional[ShellProvider]:
         if profile is None:
             return None
@@ -81,6 +84,7 @@ class RockyToolbox:
             shell_name=shell_name,
             shell_type=shell_type,
             shell_host=profile.host.strip() or None,
+            local_workdir=workspace_folder if shell_type == ShellType.LOCAL else None,
             output_max_head_tail=profile.output_max_head_tail,
         )
 

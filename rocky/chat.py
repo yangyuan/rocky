@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
-from pathlib import Path
 from typing import Callable, Optional
 
 from flut.flutter.scheduler import SchedulerBinding
@@ -150,9 +150,8 @@ class RockyChat(ChangeNotifier):
         return list(ids) if ids is not None else None
 
     @property
-    def workspace_folder(self) -> Optional[Path]:
-        value = self._metadata.workspace_folder
-        return Path(value) if value is not None else None
+    def workspace_folder(self) -> Optional[str]:
+        return self._metadata.workspace_folder
 
     def set_model_profile(self, model_profile_id: Optional[str]) -> None:
         if self._metadata.model_id == model_profile_id:
@@ -182,8 +181,8 @@ class RockyChat(ChangeNotifier):
         self.notifyListeners()
         self._on_persist(self)
 
-    def set_workspace_folder(self, workspace_folder: Path) -> None:
-        value = str(Path(workspace_folder).resolve())
+    def set_workspace_folder(self, workspace_folder: str) -> None:
+        value = os.path.abspath(os.path.expanduser(workspace_folder))
         if self._metadata.workspace_folder == value:
             return
         self._metadata = self._metadata.model_copy(update={"workspace_folder": value})

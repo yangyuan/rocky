@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from enum import Enum
+
 from pydantic import BaseModel, Field
 
 from rocky.agentic.contracts.skill import Skill
@@ -13,6 +14,7 @@ class RockyAgentConfig(BaseModel):
     model_profile: RockyModelProfile
     shell_profiles: list[RockyShellProfile] = Field(default_factory=list)
     skills: list[Skill] = Field(default_factory=list)
+    workspace_folder: str
 
 
 class RockyAgentStatus(str, Enum):

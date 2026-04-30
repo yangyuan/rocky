@@ -1,13 +1,16 @@
 from enum import StrEnum
+import ntpath
 import shlex
 import subprocess
 import sys
+from pathlib import Path
 from typing import Optional
 
 _WIN_COMMAND_LINE_LIMIT = 32_000
 
 
 class ShellType(StrEnum):
+    LOCAL = "local"
     DOCKER = "docker"
     DOCKER_IN_WSL = "docker_in_wsl"
     DOCKER_OVER_SSH = "docker_over_ssh"
@@ -18,15 +21,29 @@ class ShellType(StrEnum):
 class ShellProvider:
     def __init__(
         self,
-        shell_name: str,
+        shell_name: str = "",
         shell_type: ShellType = ShellType.DOCKER,
         shell_host: str | None = None,
+        local_workdir: str | None = None,
         output_max_head_tail: Optional[int] = None,
     ):
         self.name = shell_name
         self.shell_type = shell_type
         self.host = shell_host
+        self.local_workdir = local_workdir
         self.output_max_head_tail = output_max_head_tail
+
+    @property
+    def is_local(self) -> bool:
+        return self.shell_type == ShellType.LOCAL
+
+    @staticmethod
+    def local_os() -> str:
+        if sys.platform == "win32":
+            return "windows"
+        if sys.platform == "darwin":
+            return "macos"
+        return "linux"
 
     @staticmethod
     def build_python_exec_command(script: str, executable: str = "python") -> list[str]:
@@ -76,7 +93,8 @@ exec(compile(tree, {runner_filename!r}, 'exec'), namespace, namespace)
         return [executable, "-c", wrapper, script]
 
     async def initialize(self) -> None:
-        pass
+        if self.is_local and self.local_workdir is not None:
+            Path(self.local_workdir).mkdir(parents=True, exist_ok=True)
 
     def _is_command_too_long(self, full_command: list[str]) -> bool:
         if sys.platform != "win32":
@@ -86,7 +104,7 @@ exec(compile(tree, {runner_filename!r}, 'exec'), namespace, namespace)
     def _build_stdin_script(self, command: list[str]) -> str:
         return " ".join(shlex.quote(part) for part in command) + "\n"
 
-    def _validate_workdir(self, workdir: str | None) -> str | None:
+    def _validate_linux_workdir(self, workdir: str | None) -> str | None:
         if workdir is None:
             return None
         if not isinstance(workdir, str):
@@ -95,6 +113,22 @@ exec(compile(tree, {runner_filename!r}, 'exec'), namespace, namespace)
             raise ValueError("shell.exec workdir must not be empty.")
         if not workdir.startswith("/"):
             raise ValueError("shell.exec workdir must be an absolute Linux path.")
+        return workdir
+
+    def _validate_local_workdir(self, workdir: str | None) -> str | None:
+        if workdir is None:
+            if self.local_workdir is None:
+                return None
+            workdir = self.local_workdir
+        if not isinstance(workdir, str):
+            raise ValueError("shell.exec workdir must be a string when provided.")
+        if not workdir:
+            raise ValueError("shell.exec workdir must not be empty.")
+        if sys.platform == "win32":
+            if not ntpath.isabs(workdir):
+                raise ValueError("shell.exec workdir must be an absolute Windows path.")
+        elif not Path(workdir).is_absolute():
+            raise ValueError("shell.exec workdir must be an absolute path.")
         return workdir
 
     def _wsl_command(self, command: list[str], workdir: str | None = None) -> list[str]:
@@ -144,7 +178,9 @@ exec(compile(tree, {runner_filename!r}, 'exec'), namespace, namespace)
     def _shell_command(
         self, command: list[str], workdir: str | None = None
     ) -> list[str]:
-        workdir = self._validate_workdir(workdir)
+        if self.shell_type == ShellType.LOCAL:
+            return command
+        workdir = self._validate_linux_workdir(workdir)
         if self.shell_type == ShellType.WSL:
             return self._wsl_command(command, workdir=workdir)
         if self.shell_type == ShellType.SSH:
@@ -158,7 +194,9 @@ exec(compile(tree, {runner_filename!r}, 'exec'), namespace, namespace)
     def _shell_interactive_command(
         self, command: list[str], workdir: str | None = None
     ) -> list[str]:
-        workdir = self._validate_workdir(workdir)
+        if self.shell_type == ShellType.LOCAL:
+            return command
+        workdir = self._validate_linux_workdir(workdir)
         if self.shell_type == ShellType.WSL:
             return self._wsl_command(command, workdir=workdir)
         if self.shell_type == ShellType.SSH:
@@ -180,8 +218,9 @@ exec(compile(tree, {runner_filename!r}, 'exec'), namespace, namespace)
         workdir: str | None = None,
     ) -> subprocess.CompletedProcess[str]:
         full_command = self._shell_command(command, workdir=workdir)
+        cwd = self._validate_local_workdir(workdir) if self.is_local else None
         try:
-            if self._is_command_too_long(full_command):
+            if not self.is_local and self._is_command_too_long(full_command):
                 stdin_command = self._shell_interactive_command(
                     ["sh", "-s"], workdir=workdir
                 )
@@ -192,6 +231,7 @@ exec(compile(tree, {runner_filename!r}, 'exec'), namespace, namespace)
                     capture_output=True,
                     text=True,
                     timeout=timeout_seconds,
+                    cwd=cwd,
                 )
             else:
                 result = subprocess.run(
@@ -200,6 +240,7 @@ exec(compile(tree, {runner_filename!r}, 'exec'), namespace, namespace)
                     text=True,
                     timeout=timeout_seconds,
                     stdin=subprocess.DEVNULL,
+                    cwd=cwd,
                 )
         except (subprocess.TimeoutExpired, OSError) as error:
             print(f"[Shell] exec failed: {error}")
@@ -213,8 +254,9 @@ exec(compile(tree, {runner_filename!r}, 'exec'), namespace, namespace)
         workdir: str | None = None,
     ) -> str:
         full_command = self._shell_command(command, workdir=workdir)
+        cwd = self._validate_local_workdir(workdir) if self.is_local else None
         try:
-            if self._is_command_too_long(full_command):
+            if not self.is_local and self._is_command_too_long(full_command):
                 stdin_command = self._shell_interactive_command(
                     ["sh", "-s"], workdir=workdir
                 )
@@ -224,6 +266,7 @@ exec(compile(tree, {runner_filename!r}, 'exec'), namespace, namespace)
                     input=script.encode(),
                     capture_output=True,
                     timeout=timeout_seconds,
+                    cwd=cwd,
                 )
             else:
                 result = subprocess.run(
@@ -231,6 +274,7 @@ exec(compile(tree, {runner_filename!r}, 'exec'), namespace, namespace)
                     capture_output=True,
                     timeout=timeout_seconds,
                     stdin=subprocess.DEVNULL,
+                    cwd=cwd,
                 )
         except (subprocess.TimeoutExpired, OSError) as error:
             print(f"[Shell] exec failed: {error}")
@@ -253,6 +297,14 @@ exec(compile(tree, {runner_filename!r}, 'exec'), namespace, namespace)
         return output
 
     def _write_file(self, remote_path: str, data: bytes) -> None:
+        if self.is_local:
+            path = Path(remote_path)
+            if not path.is_absolute():
+                base = Path(self.local_workdir) if self.local_workdir else Path.cwd()
+                path = base / path
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+            return
         command = self._shell_interactive_command(
             ["sh", "-c", f"cat > {shlex.quote(remote_path)}"]
         )
@@ -269,6 +321,12 @@ exec(compile(tree, {runner_filename!r}, 'exec'), namespace, namespace)
             raise RuntimeError(stderr_text)
 
     def _read_file(self, remote_path: str) -> bytes:
+        if self.is_local:
+            path = Path(remote_path)
+            if not path.is_absolute():
+                base = Path(self.local_workdir) if self.local_workdir else Path.cwd()
+                path = base / path
+            return path.read_bytes()
         command = self._shell_command(["cat", remote_path])
         try:
             result = subprocess.run(

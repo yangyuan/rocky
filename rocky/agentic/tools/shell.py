@@ -137,11 +137,27 @@ class ShellTool(Tool):
             raise ValueError("shell.exec workdir must be a string when provided.")
         return workdir
 
+    def _extract_command(self, arguments: object, shell: ShellProvider) -> list[str]:
+        if shell.is_local:
+            if not isinstance(arguments, dict):
+                raise ValueError("shell.exec arguments must be an object.")
+            raw_command = arguments.get("cmd", arguments.get("arguments", []))
+            if not isinstance(raw_command, list):
+                raise ValueError(
+                    "shell.exec cmd must be an array of strings for local environments. "
+                    "To run shell text, pass the shell executable explicitly."
+                )
+            for part in raw_command:
+                if not isinstance(part, str):
+                    raise ValueError("All parts of 'cmd' should be strings.")
+            return raw_command
+        return Tool.extract_cmd(arguments)
+
     def handle_exec(self, tool_call: ToolCall) -> ToolResult:
         shell = self._shell(tool_call)
         if isinstance(shell, ToolResult):
             return shell
-        command = Tool.extract_cmd(tool_call.arguments)
+        command = self._extract_command(tool_call.arguments, shell)
         timeout_seconds = self._extract_timeout_seconds(tool_call.arguments)
         workdir = self._extract_workdir(tool_call.arguments)
         exec_arguments = {}
@@ -158,6 +174,23 @@ class ShellTool(Tool):
             return shell
         url = self._argument(tool_call, "url") or ""
         filepath = self._argument(tool_call, "filepath") or ""
+        if shell.is_local:
+            from pathlib import Path
+            import urllib.request
+
+            try:
+                target = Path(filepath)
+                if not target.is_absolute():
+                    base = (
+                        Path(shell.local_workdir) if shell.local_workdir else Path.cwd()
+                    )
+                    target = base / target
+                target.parent.mkdir(parents=True, exist_ok=True)
+                urllib.request.urlretrieve(str(url), target)
+                output = "OK"
+            except Exception as error:
+                output = f"FAIL: {error}"
+            return ToolResult(call_id=tool_call.id, output=output)
         script = (
             'filepath="$2"; mkdir -p "$(dirname "$filepath")" && '
             'err=$(curl -sSLf -o "$filepath" "$1" 2>&1) && echo OK || '

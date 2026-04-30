@@ -1,3 +1,4 @@
+import os
 from typing import Callable
 
 from flut.flutter.material import Colors, Dialog, Scaffold, showDialog
@@ -60,13 +61,16 @@ class RockyHome(StatelessWidget):
             initial_page=initial_page,
         )
         open_about = lambda: self._open_about(context)
-        open_shell_explorer = (
-            lambda shell_profile_id: RockyShellExplorerDialog.open_shell(
+
+        def open_shell_explorer(shell_profile_id):
+            current_chat = self.chats.current
+            RockyShellExplorerDialog.open_shell(
                 context,
                 self.settings.shell_profiles,
                 shell_profile_id,
+                current_chat.workspace_folder
+                or os.path.join(self.settings.workspace_home_folder, current_chat.id),
             )
-        )
 
         menu = RockyAppMenu(
             settings=self.settings,

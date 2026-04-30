@@ -33,6 +33,7 @@ class RockyRuntimeState(BaseModel):
         return self.model_dump_json(
             indent=indent,
             exclude={"skills": {"__all__": {"path"}}},
+            exclude_none=True,
         )
 
     def fingerprint(self) -> str:

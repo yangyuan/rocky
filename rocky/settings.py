@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -14,7 +15,7 @@ from rocky.contracts.settings import (
     RockySettingsData,
     RockyThemeSettings,
 )
-from rocky.contracts.shell import RockyShellProfile
+from rocky.contracts.shell import ROCKY_LOCAL_SHELL_PROFILE_ID, RockyShellProfile
 from rocky.services.skills_discovery import RockySkillsDiscovery
 from rocky.system import RockySystem
 from flut.flutter.foundation.change_notifier import ChangeNotifier
@@ -25,7 +26,9 @@ SETTINGS_FILENAME = "settings.json"
 ROCKY_USER_FOLDER_NAME = ".rocky"
 WORKSPACE_HOME_FOLDER_NAME = "workspace"
 SKILLS_FOLDER_NAME = "skills"
-ROCKY_RUNTIME_FOLDER = Path(__file__).resolve().parent.parent
+ROCKY_RUNTIME_FOLDER = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), os.pardir)
+)
 
 
 class RockySettings(ChangeNotifier):
@@ -33,14 +36,20 @@ class RockySettings(ChangeNotifier):
 
     def __init__(self):
         super().__init__()
-        self._rocky_runtime_folder = ROCKY_RUNTIME_FOLDER.resolve()
-        self._home_folder = Path("~").expanduser().resolve()
-        self._rocky_user_folder = self._home_folder / ROCKY_USER_FOLDER_NAME
-        self._workspace_home_folder = (
-            self._rocky_user_folder / WORKSPACE_HOME_FOLDER_NAME
+        self._rocky_runtime_folder = ROCKY_RUNTIME_FOLDER
+        self._home_folder = os.path.abspath(os.path.expanduser("~"))
+        self._rocky_user_folder = os.path.join(
+            self._home_folder, ROCKY_USER_FOLDER_NAME
         )
-        self._system_skills_folder = self._rocky_runtime_folder / SKILLS_FOLDER_NAME
-        self._user_skills_folder = self._rocky_user_folder / SKILLS_FOLDER_NAME
+        self._workspace_home_folder = os.path.join(
+            self._rocky_user_folder, WORKSPACE_HOME_FOLDER_NAME
+        )
+        self._system_skills_folder = os.path.join(
+            self._rocky_runtime_folder, SKILLS_FOLDER_NAME
+        )
+        self._user_skills_folder = os.path.join(
+            self._rocky_user_folder, SKILLS_FOLDER_NAME
+        )
         self._theme = RockyThemeSettings()
         self._chats = RockyChatsSettings()
         self._model_profiles: list[RockyModelProfile] = []
@@ -65,27 +74,27 @@ class RockySettings(ChangeNotifier):
         return cls._instance
 
     @property
-    def rocky_runtime_folder(self) -> Path:
+    def rocky_runtime_folder(self) -> str:
         return self._rocky_runtime_folder
 
     @property
-    def home_folder(self) -> Path:
+    def home_folder(self) -> str:
         return self._home_folder
 
     @property
-    def rocky_user_folder(self) -> Path:
+    def rocky_user_folder(self) -> str:
         return self._rocky_user_folder
 
     @property
-    def workspace_home_folder(self) -> Path:
+    def workspace_home_folder(self) -> str:
         return self._workspace_home_folder
 
     @property
-    def system_skills_folder(self) -> Path:
+    def system_skills_folder(self) -> str:
         return self._system_skills_folder
 
     @property
-    def user_skills_folder(self) -> Path:
+    def user_skills_folder(self) -> str:
         return self._user_skills_folder
 
     @property
@@ -364,18 +373,36 @@ class RockySettings(ChangeNotifier):
                 return model_profile.id
         return None
 
+    def _local_shell_profile(self) -> RockyShellProfile:
+        return RockyShellProfile(
+            id=ROCKY_LOCAL_SHELL_PROFILE_ID,
+            display_name=f"This {RockySystem.os_display_name()}",
+            shell_type="local",
+        )
+
+    def _ensure_local_shell_profile(self) -> None:
+        self._shell_profiles = [
+            self._local_shell_profile(),
+            *[
+                shell_profile
+                for shell_profile in self._shell_profiles
+                if shell_profile.id != ROCKY_LOCAL_SHELL_PROFILE_ID
+            ],
+        ]
+
     def _path(self) -> Path:
-        return self._rocky_user_folder / SETTINGS_FILENAME
+        return Path(self._rocky_user_folder) / SETTINGS_FILENAME
 
     def _load(self) -> None:
-        self._rocky_user_folder.mkdir(parents=True, exist_ok=True)
-        self._workspace_home_folder.mkdir(parents=True, exist_ok=True)
-        self._system_skills_folder.mkdir(parents=True, exist_ok=True)
-        self._user_skills_folder.mkdir(parents=True, exist_ok=True)
+        Path(self._rocky_user_folder).mkdir(parents=True, exist_ok=True)
+        Path(self._workspace_home_folder).mkdir(parents=True, exist_ok=True)
+        Path(self._system_skills_folder).mkdir(parents=True, exist_ok=True)
+        Path(self._user_skills_folder).mkdir(parents=True, exist_ok=True)
         self._skills = RockySkillsDiscovery(
             system_skills_folder=self._system_skills_folder,
             user_skills_folder=self._user_skills_folder,
         ).discover()
+        self._ensure_local_shell_profile()
         path = self._path()
         if not path.exists():
             self._save()
@@ -406,6 +433,7 @@ class RockySettings(ChangeNotifier):
         self._model_profiles = list(data.models)
         self._default_model_profile_id = default_model_profile_id
         self._shell_profiles = list(data.shells)
+        self._ensure_local_shell_profile()
         shell_profile_ids = {shell_profile.id for shell_profile in self._shell_profiles}
         self._default_shell_profile_ids = [
             default_id

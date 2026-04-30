@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 from flut.dart.ui import FontWeight
 from flut.flutter.material import Checkbox, Icons, InkWell, Material, TextButton, Theme
 from flut.flutter.painting import (
@@ -34,8 +32,8 @@ class RockySettingsSkillsPage(StatelessWidget):
         *,
         skills: list[Skill],
         default_skill_ids: list[str],
-        system_skills_folder: Path,
-        user_skills_folder: Path,
+        system_skills_folder: str,
+        user_skills_folder: str,
         on_set_default_skill_selected,
         key=None,
     ):
@@ -46,7 +44,7 @@ class RockySettingsSkillsPage(StatelessWidget):
         self.user_skills_folder = user_skills_folder
         self.on_set_default_skill_selected = on_set_default_skill_selected
 
-    def _folder_row(self, color_scheme, label: str, folder: Path):
+    def _folder_row(self, color_scheme, label: str, folder: str):
         return Container(
             padding=EdgeInsets.fromLTRB(12, 10, 12, 10),
             decoration=BoxDecoration(
@@ -70,7 +68,7 @@ class RockySettingsSkillsPage(StatelessWidget):
                                 ),
                                 SizedBox(height=2),
                                 Text(
-                                    str(folder),
+                                    folder,
                                     maxLines=1,
                                     overflow=TextOverflow.ellipsis,
                                     style=TextStyle(

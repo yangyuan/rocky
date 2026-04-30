@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import queue
 import shutil
 import threading
@@ -25,9 +26,10 @@ CHATS_FOLDER_NAME = "chats"
 
 
 class _ChatPersister:
-    def __init__(self, rocky_user_folder: Path):
-        self._metadata_path = rocky_user_folder / CHATS_METADATA_FILENAME
-        self._chats_folder = rocky_user_folder / CHATS_FOLDER_NAME
+    def __init__(self, rocky_user_folder: str):
+        rocky_user_path = Path(rocky_user_folder)
+        self._metadata_path = rocky_user_path / CHATS_METADATA_FILENAME
+        self._chats_folder = rocky_user_path / CHATS_FOLDER_NAME
         self._chats_folder.mkdir(parents=True, exist_ok=True)
         self._queue: "queue.Queue[Callable[[], None]]" = queue.Queue()
         self._thread = threading.Thread(
@@ -40,8 +42,10 @@ class _ChatPersister:
         payload = data.model_dump_json(indent=2)
         self._queue.put(lambda: path.write_text(payload, encoding="utf-8"))
 
-    def create_workspace_folder(self, workspace_folder: Path) -> None:
-        self._queue.put(lambda: workspace_folder.mkdir(parents=True, exist_ok=True))
+    def create_workspace_folder(self, workspace_folder: str) -> None:
+        self._queue.put(
+            lambda: Path(workspace_folder).mkdir(parents=True, exist_ok=True)
+        )
 
     def save_all_metadata(self, items: list[RockyChatMetadata]) -> None:
         payload = json.dumps([item.model_dump() for item in items], indent=2)
@@ -49,7 +53,7 @@ class _ChatPersister:
             lambda: self._metadata_path.write_text(payload, encoding="utf-8")
         )
 
-    def delete_chat(self, chat_id: str, workspace_folder: Optional[Path]) -> None:
+    def delete_chat(self, chat_id: str, workspace_folder: Optional[str]) -> None:
         path = self._chats_folder / f"{chat_id}.json"
         self._queue.put(lambda: path.unlink(missing_ok=True))
         if workspace_folder is not None:
@@ -214,7 +218,9 @@ class RockyChats(ChangeNotifier):
     def _commit_workspace_folder(self, chat: RockyChat) -> None:
         workspace_folder = chat.workspace_folder
         if workspace_folder is None:
-            workspace_folder = self._settings.workspace_home_folder / chat.id
+            workspace_folder = os.path.join(
+                self._settings.workspace_home_folder, chat.id
+            )
             chat.set_workspace_folder(workspace_folder)
         self._persister.create_workspace_folder(workspace_folder)
 
@@ -229,10 +235,14 @@ class RockyChats(ChangeNotifier):
             shell_profiles = self.shell_profiles_for(chat)
         else:
             shell_profiles = []
+        workspace_folder = chat.workspace_folder or os.path.join(
+            self._settings.workspace_home_folder, chat.id
+        )
         return RockyAgentConfig(
             model_profile=model_profile,
             shell_profiles=shell_profiles,
             skills=self.skills_for(chat),
+            workspace_folder=workspace_folder,
         )
 
     def _apply_settings(self) -> None:
@@ -300,8 +310,9 @@ class RockyChats(ChangeNotifier):
             self._start_draft()
 
     def _load(self) -> None:
-        metadata_path = self._settings.rocky_user_folder / CHATS_METADATA_FILENAME
-        chats_folder = self._settings.rocky_user_folder / CHATS_FOLDER_NAME
+        rocky_user_folder = Path(self._settings.rocky_user_folder)
+        metadata_path = rocky_user_folder / CHATS_METADATA_FILENAME
+        chats_folder = rocky_user_folder / CHATS_FOLDER_NAME
         if not metadata_path.exists():
             return
         try:
