@@ -46,6 +46,7 @@ from rocky.widgets.chat.attachments import RockyAttachmentBubbleStrip
 from rocky.widgets.rendering.markdown import RockyMarkdown
 
 CHAT_FONT_SIZE = 14
+CHAT_LINE_HEIGHT = 1.5
 METADATA_FONT_SIZE = 12
 TOOL_CONTENT_MAX_HEIGHT = 180
 
@@ -259,7 +260,11 @@ class _RockyChatBubbleState(State[RockyChatBubble]):
     def build(self, context):
         color_scheme = Theme.of(context).colorScheme
         text_color = RockyChatBubbleFrame.text_color_for(color_scheme, self.widget.role)
-        base_style = TextStyle(fontSize=CHAT_FONT_SIZE, color=text_color)
+        base_style = TextStyle(
+            fontSize=CHAT_FONT_SIZE,
+            height=CHAT_LINE_HEIGHT,
+            color=text_color,
+        )
         is_user = self.widget.role == "user"
         show_markdown = not is_user and self._ready and self._rendered
 
@@ -333,7 +338,11 @@ class _RockyAssistantStreamingBubbleState(State[_RockyAssistantStreamingBubble])
     def build(self, context):
         color_scheme = Theme.of(context).colorScheme
         text_color = RockyChatBubbleFrame.text_color_for(color_scheme, "assistant")
-        base_style = TextStyle(fontSize=CHAT_FONT_SIZE, color=text_color)
+        base_style = TextStyle(
+            fontSize=CHAT_FONT_SIZE,
+            height=CHAT_LINE_HEIGHT,
+            color=text_color,
+        )
         content = self.widget.message.content or ""
         if self._rendered:
             child = RockyMarkdown(

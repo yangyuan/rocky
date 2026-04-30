@@ -651,22 +651,19 @@ class _RockyMarkdownRenderer:
     def _inline_code_span(self, body):
         mono_style = TextStyle(
             color=self.base_style.color,
-            fontSize=(self.base_style.fontSize or 14) - 1,
+            fontSize=self.base_style.fontSize,
             fontFamily=RockySystem.monospace_font_family(),
             fontFamilyFallback=RockySystem.monospace_font_family_fallback(),
+            height=self.base_style.height,
         )
         return WidgetSpan(
             alignment=PlaceholderAlignment.middle,
             child=Container(
-                padding=EdgeInsets.symmetric(horizontal=4, vertical=1),
-                margin=EdgeInsets.symmetric(horizontal=1),
+                padding=EdgeInsets.fromLTRB(5, 0, 2, 0),
+                margin=EdgeInsets.fromLTRB(1, 0, 1, 0),
                 decoration=BoxDecoration(
                     color=self.color_scheme.surfaceContainerHighest,
-                    borderRadius=BorderRadius.circular(3),
-                    border=Border.all(
-                        width=1,
-                        color=self.color_scheme.outlineVariant,
-                    ),
+                    borderRadius=BorderRadius.circular(4),
                 ),
                 child=(
                     SelectableText(body, style=mono_style)
