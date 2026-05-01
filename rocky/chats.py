@@ -136,11 +136,20 @@ class RockyChats(ChangeNotifier):
             ids = self._settings.default_skill_ids
         return self._settings.find_skills(ids)
 
+    def mcp_server_profiles_for(self, chat: RockyChat):
+        ids = chat.mcp_server_ids
+        if ids is None:
+            ids = self._settings.default_mcp_server_ids
+        return self._settings.find_mcp_server_profiles(ids)
+
     def shell_profile_ids_for(self, chat: RockyChat) -> list[str]:
         return [shell_profile.id for shell_profile in self.shell_profiles_for(chat)]
 
     def skill_ids_for(self, chat: RockyChat) -> list[str]:
         return [skill.id for skill in self.skills_for(chat)]
+
+    def mcp_server_ids_for(self, chat: RockyChat) -> list[str]:
+        return [mcp_server.id for mcp_server in self.mcp_server_profiles_for(chat)]
 
     def model_profile_id_for(self, chat: RockyChat) -> Optional[str]:
         model_profile = self.model_profile_for(chat)
@@ -169,6 +178,19 @@ class RockyChats(ChangeNotifier):
         else:
             return
         chat.set_skill_ids(ids)
+
+    def toggle_mcp_server(
+        self, chat: RockyChat, mcp_server_id: str, selected: bool
+    ) -> None:
+        ids = list(self.mcp_server_ids_for(chat))
+        already_selected = mcp_server_id in ids
+        if selected and not already_selected:
+            ids.append(mcp_server_id)
+        elif not selected and already_selected:
+            ids = [item for item in ids if item != mcp_server_id]
+        else:
+            return
+        chat.set_mcp_server_ids(ids)
 
     def chat_ready(self, chat: RockyChat) -> tuple[bool, Optional[str]]:
         return self._settings.model_profile_ready(self.model_profile_for(chat))
@@ -214,6 +236,8 @@ class RockyChats(ChangeNotifier):
             chat.set_shell_profile_ids(self.shell_profile_ids_for(chat))
         if chat.skill_ids is None:
             chat.set_skill_ids(self.skill_ids_for(chat))
+        if chat.mcp_server_ids is None:
+            chat.set_mcp_server_ids(self.mcp_server_ids_for(chat))
 
     def _commit_workspace_folder(self, chat: RockyChat) -> None:
         workspace_folder = chat.workspace_folder
@@ -233,8 +257,10 @@ class RockyChats(ChangeNotifier):
             return None
         if RockyModelCapabilities.supports_function(model_profile):
             shell_profiles = self.shell_profiles_for(chat)
+            mcp_server_profiles = self.mcp_server_profiles_for(chat)
         else:
             shell_profiles = []
+            mcp_server_profiles = []
         workspace_folder = chat.workspace_folder or os.path.join(
             self._settings.workspace_home_folder, chat.id
         )
@@ -242,6 +268,7 @@ class RockyChats(ChangeNotifier):
             model_profile=model_profile,
             shell_profiles=shell_profiles,
             skills=self.skills_for(chat),
+            mcp_server_profiles=mcp_server_profiles,
             workspace_folder=workspace_folder,
         )
 

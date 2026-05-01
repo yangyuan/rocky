@@ -15,7 +15,7 @@ class RockyChatHost(StatefulWidget):
         *,
         settings: RockySettings,
         chats: RockyChats,
-        on_open_settings: Callable[[], None],
+        on_open_settings: Callable[[str], None],
         key=None,
     ):
         super().__init__(key=key)
@@ -58,6 +58,11 @@ class _RockyChatHostState(State[RockyChatHost]):
             on_set_skill_selected=lambda skill_id, selected: chats.toggle_skill(
                 current, skill_id, selected
             ),
+            mcp_server_profiles=settings.mcp_server_profiles,
+            selected_mcp_server_ids=chats.mcp_server_ids_for(current),
+            on_set_mcp_server_selected=lambda mcp_server_id, selected: chats.toggle_mcp_server(
+                current, mcp_server_id, selected
+            ),
             needs_setup=not chat_ready,
             setup_reason=chat_reason,
             settings_ready=chat_ready,
@@ -65,6 +70,8 @@ class _RockyChatHostState(State[RockyChatHost]):
             on_send_message=current.send_message,
             on_open_model_manager=lambda: self.widget.on_open_settings("models"),
             on_open_shell_manager=lambda: self.widget.on_open_settings("shells"),
+            on_open_skill_manager=lambda: self.widget.on_open_settings("skills"),
+            on_open_mcp_manager=lambda: self.widget.on_open_settings("mcp"),
             on_open_shell_explorer=lambda shell_profile_id: RockyShellExplorerDialog.open_shell(
                 self.context,
                 settings.shell_profiles,

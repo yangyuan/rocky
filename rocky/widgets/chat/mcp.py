@@ -36,33 +36,34 @@ from flut.flutter.widgets import (
 )
 from flut.flutter.widgets.navigator import Navigator
 
-from rocky.agentic.contracts.skill import Skill, SkillSource
+from rocky.contracts.mcp import RockyMcpServerProfile
 from rocky.widgets.dialog import RockyDialog
+from rocky.widgets.settings.mcp.type_picker import RockyMcpTemplates
 
 
-class RockyChatSkillsDialog(StatefulWidget):
+class RockyChatMcpDialog(StatefulWidget):
     def __init__(
         self,
         *,
-        skills: list[Skill],
-        selected_skill_ids: list[str],
-        on_set_skill_selected: Callable[[str, bool], None],
+        mcp_server_profiles: list[RockyMcpServerProfile],
+        selected_mcp_server_ids: list[str],
+        on_set_mcp_server_selected: Callable[[str, bool], None],
         on_open_settings: Callable[[], None],
         key=None,
     ):
         super().__init__(key=key)
-        self.skills = list(skills)
-        self.selected_skill_ids = list(selected_skill_ids)
-        self.on_set_skill_selected = on_set_skill_selected
+        self.mcp_server_profiles = list(mcp_server_profiles)
+        self.selected_mcp_server_ids = list(selected_mcp_server_ids)
+        self.on_set_mcp_server_selected = on_set_mcp_server_selected
         self.on_open_settings = on_open_settings
 
     @staticmethod
     def open(
         context,
         *,
-        skills: list[Skill],
-        selected_skill_ids: list[str],
-        on_set_skill_selected: Callable[[str, bool], None],
+        mcp_server_profiles: list[RockyMcpServerProfile],
+        selected_mcp_server_ids: list[str],
+        on_set_mcp_server_selected: Callable[[str, bool], None],
         on_open_settings: Callable[[], None],
     ) -> None:
         def _builder(dialog_context):
@@ -73,10 +74,10 @@ class RockyChatSkillsDialog(StatefulWidget):
             return Dialog(
                 backgroundColor=Colors.transparent,
                 insetPadding=EdgeInsets.all(40),
-                child=RockyChatSkillsDialog(
-                    skills=skills,
-                    selected_skill_ids=selected_skill_ids,
-                    on_set_skill_selected=on_set_skill_selected,
+                child=RockyChatMcpDialog(
+                    mcp_server_profiles=mcp_server_profiles,
+                    selected_mcp_server_ids=selected_mcp_server_ids,
+                    on_set_mcp_server_selected=on_set_mcp_server_selected,
                     on_open_settings=_open_settings,
                 ),
             )
@@ -88,37 +89,43 @@ class RockyChatSkillsDialog(StatefulWidget):
         )
 
     def createState(self):
-        return _RockyChatSkillsDialogState()
+        return _RockyChatMcpDialogState()
 
 
-class _RockyChatSkillsDialogState(State[RockyChatSkillsDialog]):
+class _RockyChatMcpDialogState(State[RockyChatMcpDialog]):
     def initState(self):
-        self._selected_skill_ids = list(self.widget.selected_skill_ids)
+        self._selected_mcp_server_ids = list(self.widget.selected_mcp_server_ids)
 
-    def _toggle(self, skill: Skill, selected: bool) -> None:
-        skill_ids = list(self._selected_skill_ids)
-        already_selected = skill.id in skill_ids
+    def _toggle(self, profile: RockyMcpServerProfile, selected: bool) -> None:
+        ids = list(self._selected_mcp_server_ids)
+        already_selected = profile.id in ids
         if selected and not already_selected:
-            skill_ids.append(skill.id)
+            ids.append(profile.id)
         elif not selected and already_selected:
-            skill_ids = [skill_id for skill_id in skill_ids if skill_id != skill.id]
+            ids = [
+                mcp_server_id for mcp_server_id in ids if mcp_server_id != profile.id
+            ]
         else:
             return
 
         def _apply():
-            self._selected_skill_ids = skill_ids
+            self._selected_mcp_server_ids = ids
 
         self.setState(_apply)
-        self.widget.on_set_skill_selected(skill.id, selected)
+        self.widget.on_set_mcp_server_selected(profile.id, selected)
 
-    def _skill_row(self, color_scheme, skill: Skill):
-        selected = skill.id in self._selected_skill_ids
+    def _row(self, color_scheme, profile: RockyMcpServerProfile):
+        selected = profile.id in self._selected_mcp_server_ids
         radius = BorderRadius.circular(8)
+        target = RockyMcpTemplates.target(profile)
+        subtitle = RockyMcpTemplates.label(profile.server_type)
+        if target:
+            subtitle = f"{subtitle} - {target}"
         return Material(
             color=color_scheme.surfaceContainerLowest,
             borderRadius=radius,
             child=InkWell(
-                onTap=lambda: self._toggle(skill, not selected),
+                onTap=lambda: self._toggle(profile, not selected),
                 borderRadius=radius,
                 hoverColor=color_scheme.onSurface.withOpacity(0.04),
                 child=Container(
@@ -133,7 +140,7 @@ class _RockyChatSkillsDialogState(State[RockyChatSkillsDialog]):
                             Checkbox(
                                 value=selected,
                                 onChanged=lambda value: self._toggle(
-                                    skill, bool(value)
+                                    profile, bool(value)
                                 ),
                             ),
                             SizedBox(width=8),
@@ -142,7 +149,7 @@ class _RockyChatSkillsDialogState(State[RockyChatSkillsDialog]):
                                     crossAxisAlignment=CrossAxisAlignment.start,
                                     children=[
                                         Text(
-                                            skill.name,
+                                            RockyMcpTemplates.display_name(profile),
                                             style=TextStyle(
                                                 fontSize=13,
                                                 fontWeight=FontWeight.w600,
@@ -151,48 +158,19 @@ class _RockyChatSkillsDialogState(State[RockyChatSkillsDialog]):
                                         ),
                                         SizedBox(height=2),
                                         Text(
-                                            skill.description,
+                                            subtitle,
                                             style=TextStyle(
                                                 fontSize=11,
                                                 color=color_scheme.onSurfaceVariant,
                                             ),
                                         ),
                                     ],
-                                ),
+                                )
                             ),
                         ],
                     ),
                 ),
             ),
-        )
-
-    def _skill_group(self, color_scheme, title: str, source: SkillSource):
-        skills = [skill for skill in self.widget.skills if skill.source == source]
-        children = [
-            Text(
-                title,
-                style=TextStyle(
-                    fontSize=12,
-                    fontWeight=FontWeight.w600,
-                    color=color_scheme.onSurfaceVariant,
-                ),
-            ),
-            SizedBox(height=6),
-        ]
-        if skills:
-            for skill in skills:
-                children.append(self._skill_row(color_scheme, skill))
-                children.append(SizedBox(height=8))
-        else:
-            children.append(
-                Text(
-                    "No skills found.",
-                    style=TextStyle(fontSize=12, color=color_scheme.onSurfaceVariant),
-                )
-            )
-        return Column(
-            crossAxisAlignment=CrossAxisAlignment.stretch,
-            children=children,
         )
 
     def _settings_button(self, color_scheme):
@@ -216,6 +194,18 @@ class _RockyChatSkillsDialogState(State[RockyChatSkillsDialog]):
 
     def build(self, context):
         color_scheme = Theme.of(context).colorScheme
+        children = []
+        if self.widget.mcp_server_profiles:
+            for profile in self.widget.mcp_server_profiles:
+                children.append(self._row(color_scheme, profile))
+                children.append(SizedBox(height=8))
+        else:
+            children.append(
+                Text(
+                    "No MCP servers configured.",
+                    style=TextStyle(fontSize=12, color=color_scheme.onSurfaceVariant),
+                )
+            )
         body = Container(
             width=460,
             height=320,
@@ -227,20 +217,8 @@ class _RockyChatSkillsDialogState(State[RockyChatSkillsDialog]):
                         child=SingleChildScrollView(
                             child=Column(
                                 crossAxisAlignment=CrossAxisAlignment.stretch,
-                                children=[
-                                    self._skill_group(
-                                        color_scheme,
-                                        "System Skills",
-                                        SkillSource.SYSTEM,
-                                    ),
-                                    SizedBox(height=10),
-                                    self._skill_group(
-                                        color_scheme,
-                                        "User Skills",
-                                        SkillSource.USER,
-                                    ),
-                                ],
-                            ),
+                                children=children,
+                            )
                         )
                     ),
                     SizedBox(height=12),
@@ -252,8 +230,8 @@ class _RockyChatSkillsDialogState(State[RockyChatSkillsDialog]):
             ),
         )
         return RockyDialog(
-            title="Skills",
-            leading_icon=Icons.extension,
+            title="MCP Servers",
+            leading_icon=Icons.hub_outlined,
             mode="fit_content",
             body=body,
         )

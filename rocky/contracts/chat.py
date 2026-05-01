@@ -40,6 +40,7 @@ class RockyChatMetadata(BaseModel):
     model_id: Optional[str] = None
     shell_ids: Optional[list[str]] = None
     skill_ids: Optional[list[str]] = None
+    mcp_server_ids: Optional[list[str]] = None
     workspace_folder: Optional[str] = None
 
 

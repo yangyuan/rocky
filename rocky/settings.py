@@ -9,6 +9,7 @@ from typing import Optional
 from pydantic import ValidationError
 
 from rocky.agentic.contracts.skill import Skill
+from rocky.contracts.mcp import RockyMcpServerProfile
 from rocky.contracts.model import RockyModelProfile, RockyModelProviderName
 from rocky.contracts.settings import (
     RockyChatsSettings,
@@ -56,6 +57,8 @@ class RockySettings(ChangeNotifier):
         self._default_model_profile_id: Optional[str] = None
         self._shell_profiles: list[RockyShellProfile] = []
         self._default_shell_profile_ids: list[str] = []
+        self._mcp_server_profiles: list[RockyMcpServerProfile] = []
+        self._default_mcp_server_ids: list[str] = []
         self._skills: list[Skill] = []
         self._default_skill_ids: list[str] = []
         self._load()
@@ -138,6 +141,18 @@ class RockySettings(ChangeNotifier):
         ]
 
     @property
+    def mcp_server_profiles(self) -> list[RockyMcpServerProfile]:
+        return list(self._mcp_server_profiles)
+
+    @property
+    def default_mcp_server_ids(self) -> list[str]:
+        return list(self._default_mcp_server_ids)
+
+    @property
+    def default_mcp_server_profiles(self) -> list[RockyMcpServerProfile]:
+        return self.find_mcp_server_profiles(self._default_mcp_server_ids)
+
+    @property
     def skills(self) -> list[Skill]:
         return list(self._skills)
 
@@ -181,6 +196,18 @@ class RockySettings(ChangeNotifier):
             skill = index.get(skill_id)
             if skill is not None:
                 result.append(skill)
+        return result
+
+    def find_mcp_server_profiles(
+        self, mcp_server_ids: list[str]
+    ) -> list[RockyMcpServerProfile]:
+        wanted = list(mcp_server_ids or [])
+        index = {mcp_server.id: mcp_server for mcp_server in self._mcp_server_profiles}
+        result: list[RockyMcpServerProfile] = []
+        for mcp_server_id in wanted:
+            mcp_server = index.get(mcp_server_id)
+            if mcp_server is not None:
+                result.append(mcp_server)
         return result
 
     def is_model_profile_selectable(self, model_profile: RockyModelProfile) -> bool:
@@ -284,8 +311,6 @@ class RockySettings(ChangeNotifier):
 
     def add_shell_profile(self, shell_profile: RockyShellProfile) -> RockyShellProfile:
         self._shell_profiles = self._shell_profiles + [shell_profile]
-        if not self._default_shell_profile_ids:
-            self._default_shell_profile_ids = [shell_profile.id]
         self._save_and_notify()
         return shell_profile
 
@@ -367,6 +392,69 @@ class RockySettings(ChangeNotifier):
         self._default_skill_ids = default_ids
         self._save_and_notify()
 
+    def add_mcp_server_profile(
+        self, mcp_server_profile: RockyMcpServerProfile
+    ) -> RockyMcpServerProfile:
+        self._mcp_server_profiles = self._mcp_server_profiles + [mcp_server_profile]
+        self._save_and_notify()
+        return mcp_server_profile
+
+    def update_mcp_server_profile(
+        self, mcp_server_profile: RockyMcpServerProfile
+    ) -> RockyMcpServerProfile:
+        replaced = False
+        next_profiles: list[RockyMcpServerProfile] = []
+        for existing in self._mcp_server_profiles:
+            if existing.id == mcp_server_profile.id:
+                next_profiles.append(mcp_server_profile)
+                replaced = True
+            else:
+                next_profiles.append(existing)
+        if not replaced:
+            return mcp_server_profile
+        self._mcp_server_profiles = next_profiles
+        self._save_and_notify()
+        return mcp_server_profile
+
+    def delete_mcp_server_profile(self, mcp_server_id: str) -> None:
+        self._mcp_server_profiles = [
+            mcp_server
+            for mcp_server in self._mcp_server_profiles
+            if mcp_server.id != mcp_server_id
+        ]
+        self._default_mcp_server_ids = [
+            default_id
+            for default_id in self._default_mcp_server_ids
+            if default_id != mcp_server_id
+        ]
+        self._save_and_notify()
+
+    def set_default_mcp_server_selected(
+        self, mcp_server_id: str, selected: bool
+    ) -> None:
+        mcp_server = next(
+            (
+                candidate
+                for candidate in self._mcp_server_profiles
+                if candidate.id == mcp_server_id
+            ),
+            None,
+        )
+        if mcp_server is None:
+            return
+        default_ids = list(self._default_mcp_server_ids)
+        already_selected = mcp_server_id in default_ids
+        if selected and not already_selected:
+            default_ids.append(mcp_server_id)
+        elif not selected and already_selected:
+            default_ids = [
+                default_id for default_id in default_ids if default_id != mcp_server_id
+            ]
+        else:
+            return
+        self._default_mcp_server_ids = default_ids
+        self._save_and_notify()
+
     def _first_selectable_model_profile_id(self) -> Optional[str]:
         for model_profile in self._model_profiles:
             if self.is_model_profile_selectable(model_profile):
@@ -434,6 +522,7 @@ class RockySettings(ChangeNotifier):
         self._default_model_profile_id = default_model_profile_id
         self._shell_profiles = list(data.shells)
         self._ensure_local_shell_profile()
+        self._mcp_server_profiles = list(data.mcp_servers)
         shell_profile_ids = {shell_profile.id for shell_profile in self._shell_profiles}
         self._default_shell_profile_ids = [
             default_id
@@ -446,6 +535,12 @@ class RockySettings(ChangeNotifier):
             for default_id in data.default_skill_ids
             if default_id in skill_ids
         ]
+        mcp_server_ids = {mcp_server.id for mcp_server in self._mcp_server_profiles}
+        self._default_mcp_server_ids = [
+            default_id
+            for default_id in data.default_mcp_server_ids
+            if default_id in mcp_server_ids
+        ]
 
     def _save(self) -> None:
         data = RockySettingsData(
@@ -456,6 +551,8 @@ class RockySettings(ChangeNotifier):
             shells=list(self._shell_profiles),
             default_shell_ids=list(self._default_shell_profile_ids),
             default_skill_ids=list(self._default_skill_ids),
+            mcp_servers=list(self._mcp_server_profiles),
+            default_mcp_server_ids=list(self._default_mcp_server_ids),
         )
         self._path().write_text(data.model_dump_json(indent=2), encoding="utf-8")
 

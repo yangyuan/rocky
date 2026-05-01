@@ -28,6 +28,7 @@ from rocky.chats import RockyChats
 from rocky.settings import RockySettings
 from rocky.widgets.dialog import RockyDialog
 from rocky.widgets.settings.chats.page import RockySettingsChatsPage
+from rocky.widgets.settings.mcp.page import RockySettingsMcpPage
 from rocky.widgets.settings.models.page import RockySettingsModelsPage
 from rocky.widgets.settings.skills.page import RockySettingsSkillsPage
 from rocky.widgets.settings.shells.page import RockySettingsShellsPage
@@ -135,7 +136,7 @@ class _RockySettingsDialogState(State[RockySettingsDialog]):
                 crossAxisAlignment=CrossAxisAlignment.stretch,
                 children=[
                     _NavigationRow(
-                        icon=Icons.smart_toy,
+                        icon=Icons.rocket_launch_outlined,
                         label="Models",
                         is_selected=self.page == "models",
                         onTap=lambda: self._set_page("models"),
@@ -151,6 +152,12 @@ class _RockySettingsDialogState(State[RockySettingsDialog]):
                         label="Skills",
                         is_selected=self.page == "skills",
                         onTap=lambda: self._set_page("skills"),
+                    ),
+                    _NavigationRow(
+                        icon=Icons.hub_outlined,
+                        label="MCP",
+                        is_selected=self.page == "mcp",
+                        onTap=lambda: self._set_page("mcp"),
                     ),
                     _NavigationRow(
                         icon=Icons.chat_bubble_outline,
@@ -197,6 +204,18 @@ class _RockySettingsDialogState(State[RockySettingsDialog]):
             on_set_default_skill_selected=settings.set_default_skill_selected,
         )
 
+    def _mcp_body(self):
+        settings = self.widget.settings
+        return RockySettingsMcpPage(
+            key=ValueKey("settings-mcp"),
+            mcp_server_profiles=settings.mcp_server_profiles,
+            default_mcp_server_ids=settings.default_mcp_server_ids,
+            on_add_mcp_server_profile=settings.add_mcp_server_profile,
+            on_update_mcp_server_profile=settings.update_mcp_server_profile,
+            on_delete_mcp_server_profile=settings.delete_mcp_server_profile,
+            on_set_default_mcp_server_selected=settings.set_default_mcp_server_selected,
+        )
+
     def _body(self):
         if self.page == "chats":
             return RockySettingsChatsPage(
@@ -208,6 +227,8 @@ class _RockySettingsDialogState(State[RockySettingsDialog]):
             return self._shells_body()
         if self.page == "skills":
             return self._skills_body()
+        if self.page == "mcp":
+            return self._mcp_body()
         return self._models_body()
 
     def build(self, context):

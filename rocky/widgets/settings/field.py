@@ -63,16 +63,22 @@ class _RockySettingsFieldState(State[RockySettingsField]):
 
     def build(self, context):
         color_scheme = Theme.of(context).colorScheme
-        children = [
-            Text(
-                self.widget.label,
-                style=TextStyle(
-                    fontSize=12,
-                    fontWeight=FontWeight.w600,
-                    color=color_scheme.onSurfaceVariant,
-                ),
-            ),
-            SizedBox(height=6),
+        children = []
+        if self.widget.label:
+            children.extend(
+                [
+                    Text(
+                        self.widget.label,
+                        style=TextStyle(
+                            fontSize=12,
+                            fontWeight=FontWeight.w600,
+                            color=color_scheme.onSurfaceVariant,
+                        ),
+                    ),
+                    SizedBox(height=6),
+                ]
+            )
+        children.append(
             Container(
                 decoration=BoxDecoration(
                     color=color_scheme.surfaceContainerLowest,
@@ -104,8 +110,8 @@ class _RockySettingsFieldState(State[RockySettingsField]):
                         disabledBorder=InputBorder.none,
                     ),
                 ),
-            ),
-        ]
+            )
+        )
         if self.widget.helper:
             children.extend(
                 [

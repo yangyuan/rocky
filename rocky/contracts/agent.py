@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 
 from rocky.agentic.contracts.skill import Skill
 from rocky.contracts.chat import RockyChatMessage, RockyToolCall
+from rocky.contracts.mcp import RockyMcpServerProfile
 from rocky.contracts.model import RockyModelProfile
 from rocky.contracts.shell import RockyShellProfile
 
@@ -14,6 +15,7 @@ class RockyAgentConfig(BaseModel):
     model_profile: RockyModelProfile
     shell_profiles: list[RockyShellProfile] = Field(default_factory=list)
     skills: list[Skill] = Field(default_factory=list)
+    mcp_server_profiles: list[RockyMcpServerProfile] = Field(default_factory=list)
     workspace_folder: str
 
 

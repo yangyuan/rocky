@@ -7,6 +7,7 @@ from flut.flutter.material import DynamicSchemeVariant
 from pydantic import BaseModel, Field
 
 from rocky.agentic.contracts.skill import Skill
+from rocky.contracts.mcp import RockyRuntimeMcpServer
 from rocky.contracts.shell import RockyRuntimeShellEnvironment
 
 
@@ -28,6 +29,7 @@ class RockyThemeOption:
 class RockyRuntimeState(BaseModel):
     shell_environments: list[RockyRuntimeShellEnvironment] = Field(default_factory=list)
     skills: list[Skill] = Field(default_factory=list)
+    mcp_servers: list[RockyRuntimeMcpServer] = Field(default_factory=list)
 
     def model_context_json(self, *, indent: int | None = None) -> str:
         return self.model_dump_json(

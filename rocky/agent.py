@@ -1,11 +1,19 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
 import json
+import os
 from typing import AsyncIterator, Optional
 
-from agents import Agent, FunctionTool, OpenAIChatCompletionsModel, Runner
+from agents import (
+    Agent,
+    FunctionTool,
+    OpenAIChatCompletionsModel,
+    Runner,
+)
 from agents.items import ToolCallItem, ToolCallOutputItem
+from agents.mcp import MCPServerManager
 from agents.tracing import set_tracing_disabled
 from openai import AsyncAzureOpenAI, AsyncOpenAI
 from openai.types.responses.response_function_tool_call import ResponseFunctionToolCall
@@ -22,6 +30,13 @@ from rocky.contracts.chat import (
     RockyAttachment,
     RockyChatMessage,
     RockyToolCall,
+)
+from rocky.contracts.mcp import (
+    RockyHttpMcpServerProperties,
+    RockyMcpServerProfile,
+    RockyMcpServerType,
+    RockyRuntimeMcpServer,
+    RockyStdioMcpServerProperties,
 )
 from rocky.contracts.model import RockyModelProviderName
 from rocky.contracts.internal import RockyRuntimeState
@@ -49,11 +64,15 @@ class _RockyAgentSession:
         self,
         inner: Agent,
         client: AsyncAzureOpenAI | AsyncOpenAI | None = None,
+        mcp_manager: MCPServerManager | None = None,
     ) -> None:
         self.inner = inner
         self._client = client
+        self._mcp_manager = mcp_manager
 
     async def close(self) -> None:
+        if self._mcp_manager is not None:
+            await self._mcp_manager.cleanup_all()
         if self._client is not None:
             await self._client.close()
 
@@ -171,13 +190,12 @@ class RockyAgent(ChangeNotifier):
             )
 
         async def _produce(emit: RockyWorkerEmitter[RockyAgentStreamEvent]) -> None:
-            session = self._build_session(
+            async with self._build_session(
                 config,
                 ROCKY_AGENT_INSTRUCTIONS,
                 "Rocky",
                 toolbox.as_sdk_tools(),
-            )
-            try:
+            ) as session:
                 result = Runner.run_streamed(session.inner, input=conversation)
                 generation_started = False
                 pending_tool_call_ids: list[str] = []
@@ -232,8 +250,6 @@ class RockyAgent(ChangeNotifier):
                                 )
                             )
                 next_input.extend(result.to_input_list())
-            finally:
-                await session.close()
 
         try:
             async for event in RockyWorker.stream(_produce):
@@ -279,16 +295,14 @@ class RockyAgent(ChangeNotifier):
             return ""
 
         async def _summarize() -> str:
-            session = self._build_session(
+            async with self._build_session(
                 config,
                 ROCKY_TITLE_SUMMARY_INSTRUCTIONS,
                 "Rocky-Title-Summary",
-            )
-            try:
+                include_mcp=False,
+            ) as session:
                 result = await Runner.run(session.inner, input=conversation)
                 return str(result.final_output or "").strip()
-            finally:
-                await session.close()
 
         return await RockyWorker.run_async(_summarize)
 
@@ -310,15 +324,22 @@ class RockyAgent(ChangeNotifier):
         self._ready_config = config
         self._set_status(RockyAgentStatus.READY)
 
-    @staticmethod
-    def _build_session(
+    @classmethod
+    @asynccontextmanager
+    async def _build_session(
+        cls,
         config: RockyAgentConfig,
         instructions: str,
         name: str,
         tools: list[FunctionTool] | None = None,
-    ) -> _RockyAgentSession:
+        include_mcp: bool = True,
+    ) -> AsyncIterator[_RockyAgentSession]:
         model_profile = config.model_profile
         client: AsyncAzureOpenAI | AsyncOpenAI | None = None
+        supports_tools = RockyModelCapabilities.supports_function(config.model_profile)
+        selected_mcp_profiles = (
+            list(config.mcp_server_profiles) if include_mcp and supports_tools else []
+        )
         if model_profile.provider == RockyModelProviderName.LITERTLM:
             from rocky.models.providers.litertlm import LiteRtLmModel
 
@@ -348,15 +369,92 @@ class RockyAgent(ChangeNotifier):
                 openai_client=client,
             )
 
-        return _RockyAgentSession(
-            Agent(
-                name=name,
-                instructions=instructions,
-                model=model,
-                tools=list(tools or []),
-            ),
-            client,
+        sdk_tools: list[object] = list(tools or [])
+        mcp_servers: list[object] = []
+        mcp_manager: MCPServerManager | None = None
+        if selected_mcp_profiles:
+            mcp_manager = MCPServerManager(
+                [cls._mcp_server(profile) for profile in selected_mcp_profiles],
+                connect_in_parallel=True,
+            )
+            try:
+                await mcp_manager.connect_all()
+                mcp_servers = mcp_manager.active_servers
+            except Exception:
+                await mcp_manager.cleanup_all()
+                if client is not None:
+                    await client.close()
+                raise
+
+        try:
+            session = _RockyAgentSession(
+                Agent(
+                    name=name,
+                    instructions=instructions,
+                    model=model,
+                    tools=sdk_tools,
+                    mcp_servers=mcp_servers,
+                    mcp_config={"convert_schemas_to_strict": True},
+                ),
+                client,
+                mcp_manager,
+            )
+        except Exception:
+            if mcp_manager is not None:
+                await mcp_manager.cleanup_all()
+            if client is not None:
+                await client.close()
+            raise
+        try:
+            yield session
+        finally:
+            await session.close()
+
+    @classmethod
+    def _mcp_server(cls, profile: RockyMcpServerProfile) -> object:
+        from agents.mcp import MCPServerStdio, MCPServerStreamableHttp
+
+        kwargs: dict[str, object] = {"cache_tools_list": True}
+        if profile.timeout is not None:
+            kwargs["client_session_timeout_seconds"] = profile.timeout
+        if profile.server_type == RockyMcpServerType.STDIO:
+            properties = profile.properties
+            if not isinstance(properties, RockyStdioMcpServerProperties):
+                properties = RockyStdioMcpServerProperties()
+            return MCPServerStdio(
+                name=cls._mcp_server_label(profile),
+                params=cls._stdio_mcp_params(properties.command),
+                **kwargs,
+            )
+        properties = profile.properties
+        if not isinstance(properties, RockyHttpMcpServerProperties):
+            properties = RockyHttpMcpServerProperties()
+        params: dict[str, object] = {"url": properties.url}
+        if properties.headers:
+            params["headers"] = dict(properties.headers)
+        if profile.timeout is not None:
+            params["timeout"] = profile.timeout
+        return MCPServerStreamableHttp(
+            name=cls._mcp_server_label(profile),
+            params=params,
+            **kwargs,
         )
+
+    @staticmethod
+    def _stdio_mcp_params(command_line: str) -> dict[str, object]:
+        command = (command_line or "").strip()
+        if not command:
+            return {"command": ""}
+        if os.name == "nt":
+            return {"command": "cmd.exe", "args": ["/d", "/s", "/c", command]}
+        return {"command": "/bin/sh", "args": ["-lc", command]}
+
+    @staticmethod
+    def _mcp_server_label(profile: RockyMcpServerProfile) -> str:
+        display = (profile.display_name or "").strip()
+        if display:
+            return display
+        return profile.id
 
     @classmethod
     def _tool_call_payload(cls, item: object) -> RockyToolCall | None:
@@ -364,7 +462,14 @@ class RockyAgent(ChangeNotifier):
             return None
         raw = item.raw_item
         if not isinstance(raw, ResponseFunctionToolCall):
-            return None
+            call_id = str(getattr(raw, "call_id", getattr(raw, "id", "")) or "")
+            name = str(getattr(raw, "name", getattr(raw, "type", "tool")) or "tool")
+            arguments = getattr(raw, "arguments", getattr(raw, "input", None))
+            return RockyToolCall(
+                id=call_id,
+                name=name,
+                arguments=cls._decode_tool_arguments(arguments),
+            )
         return RockyToolCall(
             id=raw.call_id,
             name=raw.name,
@@ -414,6 +519,9 @@ class RockyAgent(ChangeNotifier):
         toolbox = toolbox or self._toolbox
         shell_profiles = list(config.shell_profiles) if config is not None else []
         skills = list(config.skills) if config is not None else []
+        mcp_server_profiles = (
+            list(config.mcp_server_profiles) if config is not None else []
+        )
         active_shell_ids = set(toolbox.shells.keys())
         environments = [
             RockyRuntimeShellEnvironment(
@@ -433,7 +541,19 @@ class RockyAgent(ChangeNotifier):
             for shell_profile in shell_profiles
             if shell_profile.id in active_shell_ids
         ]
-        return RockyRuntimeState(shell_environments=environments, skills=skills)
+        mcp_servers = [
+            RockyRuntimeMcpServer(
+                id=mcp_server.id,
+                name=self._mcp_server_label(mcp_server),
+                type=mcp_server.server_type,
+            )
+            for mcp_server in mcp_server_profiles
+        ]
+        return RockyRuntimeState(
+            shell_environments=environments,
+            skills=skills,
+            mcp_servers=mcp_servers,
+        )
 
     def _runtime_developer_messages(
         self,

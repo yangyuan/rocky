@@ -150,6 +150,11 @@ class RockyChat(ChangeNotifier):
         return list(ids) if ids is not None else None
 
     @property
+    def mcp_server_ids(self) -> Optional[list[str]]:
+        ids = self._metadata.mcp_server_ids
+        return list(ids) if ids is not None else None
+
+    @property
     def workspace_folder(self) -> Optional[str]:
         return self._metadata.workspace_folder
 
@@ -177,6 +182,15 @@ class RockyChat(ChangeNotifier):
         if self._metadata.skill_ids == new_ids:
             return
         self._metadata = self._metadata.model_copy(update={"skill_ids": new_ids})
+        self.reconfigure_agent()
+        self.notifyListeners()
+        self._on_persist(self)
+
+    def set_mcp_server_ids(self, mcp_server_ids: list[str]) -> None:
+        new_ids = list(mcp_server_ids)
+        if self._metadata.mcp_server_ids == new_ids:
+            return
+        self._metadata = self._metadata.model_copy(update={"mcp_server_ids": new_ids})
         self.reconfigure_agent()
         self.notifyListeners()
         self._on_persist(self)

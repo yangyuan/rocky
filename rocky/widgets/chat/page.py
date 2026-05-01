@@ -42,6 +42,7 @@ from rocky.models.capabilities import RockyModelCapabilities
 from rocky.models.templates import RockyModelTemplates
 from rocky.system import RockySystem
 from rocky.widgets.chat.composer import RockyChatComposer
+from rocky.widgets.chat.mcp import RockyChatMcpDialog
 from rocky.widgets.chat.messages import RockyChatMessageList
 from rocky.widgets.chat.skills import RockyChatSkillsDialog
 from rocky.widgets.settings.shells.type_picker import RockyShellTemplates
@@ -64,8 +65,13 @@ class RockyChatHeader(StatelessWidget):
         skills,
         selected_skill_ids,
         on_set_skill_selected,
+        mcp_server_profiles,
+        selected_mcp_server_ids,
+        on_set_mcp_server_selected,
         on_open_model_manager,
         on_open_shell_manager,
+        on_open_skill_manager,
+        on_open_mcp_manager,
         on_open_shell_explorer,
         workspace_folder: str | None,
         key=None,
@@ -80,8 +86,13 @@ class RockyChatHeader(StatelessWidget):
         self.skills = skills or []
         self.selected_skill_ids = selected_skill_ids or []
         self.on_set_skill_selected = on_set_skill_selected
+        self.mcp_server_profiles = mcp_server_profiles or []
+        self.selected_mcp_server_ids = selected_mcp_server_ids or []
+        self.on_set_mcp_server_selected = on_set_mcp_server_selected
         self.on_open_model_manager = on_open_model_manager
         self.on_open_shell_manager = on_open_shell_manager
+        self.on_open_skill_manager = on_open_skill_manager
+        self.on_open_mcp_manager = on_open_mcp_manager
         self.on_open_shell_explorer = on_open_shell_explorer
         self.workspace_folder = workspace_folder
 
@@ -431,6 +442,7 @@ class RockyChatHeader(StatelessWidget):
                 skills=self.skills,
                 selected_skill_ids=self.selected_skill_ids,
                 on_set_skill_selected=self.on_set_skill_selected,
+                on_open_settings=self.on_open_skill_manager,
             ),
             child=Row(
                 mainAxisSize=MainAxisSize.min,
@@ -438,6 +450,27 @@ class RockyChatHeader(StatelessWidget):
                     Icon(Icons.extension, size=18, color=color),
                     SizedBox(width=6),
                     Text("Skills", style=TextStyle(fontSize=13, color=color)),
+                ],
+            ),
+        )
+
+    def _chat_mcp_override_button(self, context):
+        color_scheme = Theme.of(context).colorScheme
+        color = color_scheme.onSurfaceVariant
+        return TextButton(
+            onPressed=lambda: RockyChatMcpDialog.open(
+                context,
+                mcp_server_profiles=self.mcp_server_profiles,
+                selected_mcp_server_ids=self.selected_mcp_server_ids,
+                on_set_mcp_server_selected=self.on_set_mcp_server_selected,
+                on_open_settings=self.on_open_mcp_manager,
+            ),
+            child=Row(
+                mainAxisSize=MainAxisSize.min,
+                children=[
+                    Icon(Icons.hub_outlined, size=18, color=color),
+                    SizedBox(width=6),
+                    Text("MCP", style=TextStyle(fontSize=13, color=color)),
                 ],
             ),
         )
@@ -468,6 +501,8 @@ class RockyChatHeader(StatelessWidget):
                     shell_menu,
                     Expanded(child=Container()),
                     self._chat_skills_override_button(context),
+                    SizedBox(width=4),
+                    self._chat_mcp_override_button(context),
                     SizedBox(width=4),
                     self._workspace_button(context),
                 ],
@@ -628,6 +663,9 @@ class RockyChatPage(StatelessWidget):
         skills,
         selected_skill_ids,
         on_set_skill_selected,
+        mcp_server_profiles,
+        selected_mcp_server_ids,
+        on_set_mcp_server_selected,
         needs_setup,
         setup_reason,
         settings_ready,
@@ -635,6 +673,8 @@ class RockyChatPage(StatelessWidget):
         on_send_message,
         on_open_model_manager,
         on_open_shell_manager,
+        on_open_skill_manager,
+        on_open_mcp_manager,
         on_open_shell_explorer,
         key=None,
     ):
@@ -648,6 +688,9 @@ class RockyChatPage(StatelessWidget):
         self.skills = skills or []
         self.selected_skill_ids = selected_skill_ids or []
         self.on_set_skill_selected = on_set_skill_selected
+        self.mcp_server_profiles = mcp_server_profiles or []
+        self.selected_mcp_server_ids = selected_mcp_server_ids or []
+        self.on_set_mcp_server_selected = on_set_mcp_server_selected
         self.needs_setup = needs_setup
         self.setup_reason = setup_reason
         self.settings_ready = settings_ready
@@ -655,6 +698,8 @@ class RockyChatPage(StatelessWidget):
         self.on_send_message = on_send_message
         self.on_open_model_manager = on_open_model_manager
         self.on_open_shell_manager = on_open_shell_manager
+        self.on_open_skill_manager = on_open_skill_manager
+        self.on_open_mcp_manager = on_open_mcp_manager
         self.on_open_shell_explorer = on_open_shell_explorer
 
     def _body(self):
@@ -687,8 +732,13 @@ class RockyChatPage(StatelessWidget):
                         skills=self.skills,
                         selected_skill_ids=self.selected_skill_ids,
                         on_set_skill_selected=self.on_set_skill_selected,
+                        mcp_server_profiles=self.mcp_server_profiles,
+                        selected_mcp_server_ids=self.selected_mcp_server_ids,
+                        on_set_mcp_server_selected=self.on_set_mcp_server_selected,
                         on_open_model_manager=self.on_open_model_manager,
                         on_open_shell_manager=self.on_open_shell_manager,
+                        on_open_skill_manager=self.on_open_skill_manager,
+                        on_open_mcp_manager=self.on_open_mcp_manager,
                         on_open_shell_explorer=self.on_open_shell_explorer,
                         workspace_folder=self.chat.workspace_folder,
                     ),

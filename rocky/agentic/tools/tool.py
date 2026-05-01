@@ -22,11 +22,9 @@ class Tool:
         self._config: Dict[str, Any] = {}
 
     def set_config(self, config: Dict[str, Any]) -> None:
-        """Set the full configuration dictionary for this tool."""
         self._config = config
 
     def get_config(self, namespace: str, default: Any = None) -> Any:
-        """Get configuration for a specific namespace key."""
         return self._config.get(namespace, default)
 
     def get_tool_definition(self) -> ToolDefinition:
@@ -45,7 +43,6 @@ class Tool:
         self.callbacks[function_name] = callback
 
     async def initialize(self) -> None:
-        """Initialize the tool. Override to perform setup."""
         pass
 
     async def handle_tool_call(self, tool_call: ToolCall) -> ToolResult:
@@ -75,7 +72,6 @@ class Tool:
         if not isinstance(tools, list):
             raise ValueError(f"'tools' must be a list in {filename}")
 
-        # Count function_group entries
         function_groups = [t for t in tools if t.get("type") == "function_group"]
         if len(function_groups) != 1:
             raise ValueError(
@@ -157,9 +153,6 @@ class Tool:
             raise ValueError(
                 "No 'cmd' or 'arguments' found in arguments." + str(arguments)
             )
-        # The model tends to use 'cmd' as a string or pass the entire arguments as a string,
-        # regardless of the schema definition. It should be harmless to execute a string
-        # as a bash command.
         if isinstance(cmd, str):
             cmd = ["bash", "-lc", cmd]
         if not isinstance(cmd, list):

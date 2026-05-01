@@ -4,6 +4,7 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
+from rocky.contracts.mcp import RockyMcpServerProfile
 from rocky.contracts.model import RockyModelProfile
 from rocky.contracts.shell import RockyShellProfile
 
@@ -26,3 +27,5 @@ class RockySettingsData(BaseModel):
     shells: list[RockyShellProfile] = Field(default_factory=list)
     default_shell_ids: list[str] = Field(default_factory=list)
     default_skill_ids: list[str] = Field(default_factory=list)
+    mcp_servers: list[RockyMcpServerProfile] = Field(default_factory=list)
+    default_mcp_server_ids: list[str] = Field(default_factory=list)

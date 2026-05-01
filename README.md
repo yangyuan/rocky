@@ -14,9 +14,10 @@ Rocky has no intention of competing with business-oriented products. Instead, it
 
 ## Agent Features
 
-- Multiple shell environments: Connect to various shell environments to complete user tasks or control them on behalf of the user. Explorer can be used to browse and manage the shell environments.
-- Web search: Search the web, open pages, and find text within fetched pages using `ddgs` package.
-- Skills: Support standard Claude/Codex skills from local skill folders or `.zip` files.
+- **Shell Environments**: Connect to various shell environments to complete user tasks or control them on behalf of the user. Explorer can be used to browse and manage the shell environments.
+- **Web Search**: Search the web, open pages, and find text within fetched pages using `ddgs` package.
+- **Skills**: Support standard Claude/Codex skills from local skill folders or `.zip` files.
+- **MCP**: Support standard STDIO and HTTP MCP servers.
 - More are coming soon.
 
 ## Usage

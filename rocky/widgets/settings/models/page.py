@@ -124,9 +124,7 @@ class _RockySettingsModelsPageState(State[RockySettingsModelsPage]):
                 insetPadding=EdgeInsets.all(40),
                 child=RockyDialog(
                     title="Edit model" if initial is not None else "Add model",
-                    leading_icon=(
-                        Icons.edit_outlined if initial is not None else Icons.add
-                    ),
+                    leading_icon=Icons.rocket_launch_outlined,
                     mode="fit_content",
                     on_close=lambda: Navigator.pop(dialog_context),
                     body=Builder(builder=_editor_body),
