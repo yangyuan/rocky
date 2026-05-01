@@ -10,6 +10,7 @@ from agents import (
     Agent,
     FunctionTool,
     OpenAIChatCompletionsModel,
+    OpenAIResponsesModel,
     Runner,
 )
 from agents.items import ToolCallItem, ToolCallOutputItem
@@ -38,7 +39,7 @@ from rocky.contracts.mcp import (
     RockyRuntimeMcpServer,
     RockyStdioMcpServerProperties,
 )
-from rocky.contracts.model import RockyModelProviderName
+from rocky.contracts.model import RockyModelApi, RockyModelProviderName
 from rocky.contracts.internal import RockyRuntimeState
 from rocky.contracts.shell import RockyRuntimeShellEnvironment
 from rocky.services.attachments import RockyAttachments
@@ -57,6 +58,7 @@ set_tracing_disabled(True)
 
 
 AZURE_API_VERSION = "2024-10-21"
+ROCKY_AGENT_MAX_TURNS = 100
 
 
 class _RockyAgentSession:
@@ -196,7 +198,11 @@ class RockyAgent(ChangeNotifier):
                 "Rocky",
                 toolbox.as_sdk_tools(),
             ) as session:
-                result = Runner.run_streamed(session.inner, input=conversation)
+                result = Runner.run_streamed(
+                    session.inner,
+                    input=conversation,
+                    max_turns=ROCKY_AGENT_MAX_TURNS,
+                )
                 generation_started = False
                 pending_tool_call_ids: list[str] = []
                 async for event in result.stream_events():
@@ -336,38 +342,61 @@ class RockyAgent(ChangeNotifier):
     ) -> AsyncIterator[_RockyAgentSession]:
         model_profile = config.model_profile
         client: AsyncAzureOpenAI | AsyncOpenAI | None = None
+        backend_model: str | None = None
         supports_tools = RockyModelCapabilities.supports_function(config.model_profile)
         selected_mcp_profiles = (
             list(config.mcp_server_profiles) if include_mcp and supports_tools else []
         )
-        if model_profile.provider == RockyModelProviderName.LITERTLM:
-            from rocky.models.providers.litertlm import LiteRtLmModel
+        match model_profile.provider:
+            case RockyModelProviderName.LITERTLM:
+                from rocky.models.providers.litertlm import LiteRtLmModel
 
-            path = (model_profile.name or "").strip()
-            if not path:
-                raise ValueError("LiteRT-LM model file path is required.")
-            model = LiteRtLmModel(path)
-        elif model_profile.provider == RockyModelProviderName.AZURE_OPENAI:
-            if not model_profile.endpoint:
-                raise ValueError("endpoint is required for azure_openai")
-            client = AsyncAzureOpenAI(
-                api_key=model_profile.key,
-                azure_endpoint=model_profile.endpoint,
-                api_version=AZURE_API_VERSION,
-            )
-            backend_model = (
-                model_profile.deployment or ""
-            ).strip() or model_profile.name
-            model = OpenAIChatCompletionsModel(
-                model=backend_model,
-                openai_client=client,
-            )
-        else:
-            client = AsyncOpenAI(api_key=model_profile.key)
-            model = OpenAIChatCompletionsModel(
-                model=model_profile.name,
-                openai_client=client,
-            )
+                path = (model_profile.name or "").strip()
+                if not path:
+                    raise ValueError("LiteRT-LM model file path is required.")
+                model = LiteRtLmModel(path)
+            case RockyModelProviderName.AZURE_OPENAI:
+                if not model_profile.endpoint:
+                    raise ValueError("endpoint is required for azure_openai")
+                deployment = (model_profile.deployment or "").strip() or None
+                client = AsyncAzureOpenAI(
+                    api_key=model_profile.key,
+                    azure_endpoint=model_profile.endpoint,
+                    azure_deployment=deployment,
+                    api_version=AZURE_API_VERSION,
+                    default_headers=model_profile.headers or None,
+                )
+                backend_model = model_profile.name
+            case RockyModelProviderName.OPENAI_COMPATIBLE:
+                if not model_profile.endpoint:
+                    raise ValueError("endpoint is required for openai_compatible")
+                client = AsyncOpenAI(
+                    api_key=model_profile.key,
+                    base_url=model_profile.endpoint,
+                    default_headers=model_profile.headers or None,
+                )
+                backend_model = model_profile.name
+            case _:
+                client = AsyncOpenAI(
+                    api_key=model_profile.key,
+                    default_headers=model_profile.headers or None,
+                )
+                backend_model = model_profile.name
+
+        if backend_model is not None:
+            if client is None:
+                raise RuntimeError("OpenAI client was not initialized.")
+            match model_profile.api:
+                case RockyModelApi.RESPONSES:
+                    model = OpenAIResponsesModel(
+                        model=backend_model,
+                        openai_client=client,
+                    )
+                case _:
+                    model = OpenAIChatCompletionsModel(
+                        model=backend_model,
+                        openai_client=client,
+                    )
 
         sdk_tools: list[object] = list(tools or [])
         mcp_servers: list[object] = []
@@ -394,7 +423,7 @@ class RockyAgent(ChangeNotifier):
                     model=model,
                     tools=sdk_tools,
                     mcp_servers=mcp_servers,
-                    mcp_config={"convert_schemas_to_strict": True},
+                    mcp_config={"convert_schemas_to_strict": False},
                 ),
                 client,
                 mcp_manager,

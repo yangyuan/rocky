@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Optional
 
 from rocky.contracts.model import (
+    RockyModelApi,
     RockyModelCapability,
     RockyModelCapabilityDefinition,
     RockyModelManifest,
@@ -19,13 +20,24 @@ class RockyModelTemplates:
     PROVIDERS: tuple[RockyModelProviderName, ...] = (
         RockyModelProviderName.OPENAI,
         RockyModelProviderName.AZURE_OPENAI,
+        RockyModelProviderName.OPENAI_COMPATIBLE,
         RockyModelProviderName.LITERTLM,
     )
     LABELS: dict[RockyModelProviderName, str] = {
         RockyModelProviderName.OPENAI: "OpenAI",
         RockyModelProviderName.AZURE_OPENAI: "Azure OpenAI",
+        RockyModelProviderName.OPENAI_COMPATIBLE: "OpenAI API",
         RockyModelProviderName.LITERTLM: "LiteRT-LM",
     }
+    API_LABELS: dict[RockyModelApi, str] = {
+        RockyModelApi.CHAT_COMPLETIONS: "Chat Completions",
+        RockyModelApi.RESPONSES: "Responses",
+    }
+    OPENAI_API_PROVIDERS: tuple[RockyModelProviderName, ...] = (
+        RockyModelProviderName.OPENAI,
+        RockyModelProviderName.AZURE_OPENAI,
+        RockyModelProviderName.OPENAI_COMPATIBLE,
+    )
 
     _manifest: Optional[RockyModelManifest] = None
 
@@ -51,6 +63,14 @@ class RockyModelTemplates:
     @classmethod
     def label(cls, provider: RockyModelProviderName) -> str:
         return cls.LABELS.get(provider, provider.value)
+
+    @classmethod
+    def api_label(cls, api: RockyModelApi) -> str:
+        return cls.API_LABELS.get(api, api.value)
+
+    @classmethod
+    def supports_api_selection(cls, provider: RockyModelProviderName) -> bool:
+        return provider in cls.OPENAI_API_PROVIDERS
 
     @classmethod
     def all(cls, provider: RockyModelProviderName) -> list[RockyModelTemplate]:

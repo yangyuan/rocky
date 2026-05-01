@@ -31,6 +31,8 @@ class RockySettingsField(StatefulWidget):
         hint_text=None,
         helper=None,
         obscure=False,
+        min_lines=None,
+        max_lines=1,
         key=None,
     ):
         super().__init__(key=key)
@@ -40,6 +42,8 @@ class RockySettingsField(StatefulWidget):
         self.hint_text = hint_text
         self.helper = helper
         self.obscure = obscure
+        self.min_lines = min_lines
+        self.max_lines = max_lines
 
     def createState(self):
         return _RockySettingsFieldState()
@@ -89,6 +93,8 @@ class _RockySettingsFieldState(State[RockySettingsField]):
                 child=TextField(
                     controller=self._controller,
                     obscureText=self.widget.obscure,
+                    minLines=self.widget.min_lines,
+                    maxLines=self.widget.max_lines,
                     onSubmitted=self._submit,
                     onChanged=self._submit,
                     style=TextStyle(

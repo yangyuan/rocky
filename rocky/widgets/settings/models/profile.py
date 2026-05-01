@@ -63,7 +63,11 @@ class RockyModelProfileCard(StatelessWidget):
         color_scheme = Theme.of(context).colorScheme
         profile = self.profile
         provider_label = RockyModelTemplates.label(profile.provider)
-        subtitle = f"{provider_label} \u00b7 {profile.name or '(no model)'}"
+        subtitle_parts = [provider_label]
+        if RockyModelTemplates.supports_api_selection(profile.provider):
+            subtitle_parts.append(RockyModelTemplates.api_label(profile.api))
+        subtitle_parts.append(profile.name or "(no model)")
+        subtitle = " \u00b7 ".join(subtitle_parts)
         is_selectable = not (
             profile.provider == RockyModelProviderName.LITERTLM
             and not RockySystem.is_litert_lm_installed()
@@ -76,6 +80,17 @@ class RockyModelProfileCard(StatelessWidget):
                 color_scheme.onSurfaceVariant,
             ),
         ]
+        if RockyModelTemplates.supports_api_selection(profile.provider):
+            badges.extend(
+                [
+                    SizedBox(width=6),
+                    self._badge(
+                        RockyModelTemplates.api_label(profile.api),
+                        color_scheme.surfaceContainerHighest,
+                        color_scheme.onSurfaceVariant,
+                    ),
+                ]
+            )
         if self.is_default:
             badges.extend(
                 [

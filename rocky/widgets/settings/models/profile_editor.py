@@ -1,7 +1,8 @@
+import json
 import uuid
 from typing import Optional
 
-from flut.dart.ui import FontWeight
+from flut.dart.ui import FontWeight, Radius, TextAlign
 from flut.flutter.material import (
     Colors,
     Dialog,
@@ -38,6 +39,7 @@ from flut.flutter.widgets.navigator import Navigator
 from flut.flutter.foundation.key import ValueKey
 
 from rocky.contracts.model import (
+    RockyModelApi,
     RockyModelCapability,
     RockyModelProfile,
     RockyModelProviderName,
@@ -77,6 +79,7 @@ class _RockyModelProfileEditorState(State[RockyModelProfileEditor]):
             self.display_name = ""
             self.display_name_overridden = False
             self.provider = RockyModelProviderName.OPENAI
+            self.api = RockyModelApi.CHAT_COMPLETIONS
             recommended = RockyModelTemplates.recommended(self.provider)
             self.name = recommended.name if recommended else ""
             self.capabilities = RockyModelCapabilities.baseline(
@@ -86,15 +89,18 @@ class _RockyModelProfileEditorState(State[RockyModelProfileEditor]):
             self.key = ""
             self.endpoint = ""
             self.deployment = ""
+            self.headers_text = ""
         else:
             self.profile_id = initial.id
             self.display_name = initial.display_name
             self.provider = initial.provider
+            self.api = initial.api
             self.name = initial.name
             self.capabilities = self._initial_capabilities(initial)
             self.key = initial.key
             self.endpoint = initial.endpoint
             self.deployment = initial.deployment
+            self.headers_text = self._headers_to_text(initial.headers)
             self.display_name_overridden = (
                 bool((initial.display_name or "").strip())
                 and initial.display_name.strip() != self._derived_display_name()
@@ -144,6 +150,7 @@ class _RockyModelProfileEditorState(State[RockyModelProfileEditor]):
     def _apply_provider(self, provider):
         def _apply():
             self.provider = provider
+            self.api = RockyModelApi.CHAT_COMPLETIONS
             recommended = RockyModelTemplates.recommended(provider)
             if provider == RockyModelProviderName.LITERTLM:
                 self.name = ""
@@ -155,6 +162,7 @@ class _RockyModelProfileEditorState(State[RockyModelProfileEditor]):
             )
             self.endpoint = ""
             self.deployment = ""
+            self.headers_text = ""
             self.error = None
 
         self.setState(_apply)
@@ -187,6 +195,12 @@ class _RockyModelProfileEditorState(State[RockyModelProfileEditor]):
 
         self.setState(_apply)
 
+    def _set_api(self, value):
+        def _apply():
+            self.api = value
+
+        self.setState(_apply)
+
     def _set_key(self, value):
         self.key = value
 
@@ -195,6 +209,9 @@ class _RockyModelProfileEditorState(State[RockyModelProfileEditor]):
 
     def _set_deployment(self, value):
         self.deployment = value
+
+    def _set_headers_text(self, value):
+        self.headers_text = value
 
     def _set_capabilities(self, value: list[RockyModelCapability]):
         def _apply():
@@ -234,16 +251,29 @@ class _RockyModelProfileEditorState(State[RockyModelProfileEditor]):
             self._set_error("Please choose a model.")
             return
         if (
-            self.provider != RockyModelProviderName.LITERTLM
+            self.provider
+            not in (
+                RockyModelProviderName.LITERTLM,
+                RockyModelProviderName.OPENAI_COMPATIBLE,
+            )
             and not (self.key or "").strip()
         ):
             self._set_error("API key is required.")
             return
         if (
-            self.provider == RockyModelProviderName.AZURE_OPENAI
+            self.provider
+            in (
+                RockyModelProviderName.AZURE_OPENAI,
+                RockyModelProviderName.OPENAI_COMPATIBLE,
+            )
             and not (self.endpoint or "").strip()
         ):
             self._set_error("Endpoint is required.")
+            return
+        try:
+            self._parse_headers()
+        except ValueError as error:
+            self._set_error(str(error))
             return
         if (
             self.provider == RockyModelProviderName.LITERTLM
@@ -258,6 +288,7 @@ class _RockyModelProfileEditorState(State[RockyModelProfileEditor]):
             id=self.profile_id or uuid.uuid4().hex,
             display_name=self._effective_display_name().strip(),
             provider=self.provider,
+            api=self.api,
             name=(self.name or "").strip(),
             capabilities=RockyModelCapabilities.profile_overrides(
                 provider=self.provider,
@@ -267,8 +298,40 @@ class _RockyModelProfileEditorState(State[RockyModelProfileEditor]):
             key=self.key,
             endpoint=(self.endpoint or "").strip(),
             deployment=(self.deployment or "").strip(),
+            headers=self._parse_headers(),
         )
         self.widget.on_save(profile)
+
+    @staticmethod
+    def _headers_to_text(headers: dict[str, str]) -> str:
+        return "\n".join(f"{key}: {value}" for key, value in headers.items())
+
+    def _parse_headers(self) -> dict[str, str]:
+        text = (self.headers_text or "").strip()
+        if not text:
+            return {}
+        if text.startswith("{"):
+            try:
+                value = json.loads(text)
+            except json.JSONDecodeError as error:
+                raise ValueError("Custom headers must be valid JSON.") from error
+            if not isinstance(value, dict):
+                raise ValueError("Custom headers JSON must be an object.")
+            return {str(key): str(item) for key, item in value.items()}
+
+        headers: dict[str, str] = {}
+        for line in text.splitlines():
+            item = line.strip()
+            if not item:
+                continue
+            if ":" not in item:
+                raise ValueError("Custom headers must use Name: value lines.")
+            key, value = item.split(":", 1)
+            key = key.strip()
+            if not key:
+                raise ValueError("Custom header names cannot be empty.")
+            headers[key] = value.strip()
+        return headers
 
     def _browse_litertlm_file(self):
         path = RockySystem.tk_select_file_with_types(
@@ -338,6 +401,74 @@ class _RockyModelProfileEditorState(State[RockyModelProfileEditor]):
             children=[self._quick_pick_chip(color_scheme, t) for t in templates],
         )
 
+    def _api_segment(self, color_scheme, api, is_first, is_last):
+        selected = api == self.api
+        background = (
+            color_scheme.primary.withOpacity(0.10) if selected else Colors.transparent
+        )
+        foreground = color_scheme.primary if selected else color_scheme.onSurfaceVariant
+        radius = BorderRadius(
+            topLeft=Radius.circular(8) if is_first else Radius.zero,
+            bottomLeft=Radius.circular(8) if is_first else Radius.zero,
+            topRight=Radius.circular(8) if is_last else Radius.zero,
+            bottomRight=Radius.circular(8) if is_last else Radius.zero,
+        )
+        return Expanded(
+            child=Material(
+                color=Colors.transparent,
+                child=InkWell(
+                    onTap=lambda value=api: self._set_api(value),
+                    borderRadius=radius,
+                    hoverColor=color_scheme.onSurface.withOpacity(0.04),
+                    child=Container(
+                        padding=EdgeInsets.symmetric(horizontal=12, vertical=8),
+                        decoration=BoxDecoration(color=background, borderRadius=radius),
+                        child=Text(
+                            RockyModelTemplates.api_label(api),
+                            textAlign=TextAlign.center,
+                            style=TextStyle(
+                                fontSize=12,
+                                fontWeight=(
+                                    FontWeight.w600 if selected else FontWeight.w500
+                                ),
+                                color=foreground,
+                            ),
+                        ),
+                    ),
+                ),
+            )
+        )
+
+    def _api_selector(self, color_scheme):
+        apis = (RockyModelApi.CHAT_COMPLETIONS, RockyModelApi.RESPONSES)
+        last = len(apis) - 1
+        return Column(
+            crossAxisAlignment=CrossAxisAlignment.stretch,
+            children=[
+                Text(
+                    "OpenAI API",
+                    style=TextStyle(
+                        fontSize=12,
+                        fontWeight=FontWeight.w600,
+                        color=color_scheme.onSurfaceVariant,
+                    ),
+                ),
+                SizedBox(height=6),
+                Container(
+                    decoration=BoxDecoration(
+                        borderRadius=BorderRadius.circular(8),
+                        border=Border.all(width=1, color=color_scheme.outlineVariant),
+                    ),
+                    child=Row(
+                        children=[
+                            self._api_segment(color_scheme, api, i == 0, i == last)
+                            for i, api in enumerate(apis)
+                        ],
+                    ),
+                ),
+            ],
+        )
+
     def _provider_specific(self, color_scheme):
         if self.provider == RockyModelProviderName.LITERTLM:
             return [
@@ -371,32 +502,53 @@ class _RockyModelProfileEditorState(State[RockyModelProfileEditor]):
 
         templates = RockyModelTemplates.all(self.provider)
         provider_name = self.provider.value
+        is_compatible = self.provider == RockyModelProviderName.OPENAI_COMPATIBLE
         children = [
+            self._api_selector(color_scheme),
+            SizedBox(height=14),
             RockySettingsField(
                 key=ValueKey(f"api-key-{provider_name}"),
-                label="API key",
+                label="Bearer token (optional)" if is_compatible else "API key",
                 value=self.key,
                 on_changed=self._set_key,
-                hint_text="sk-...",
+                hint_text="sk-..." if not is_compatible else "Optional token",
                 helper=(
-                    "Stored locally in config.json."
-                    if self.provider == RockyModelProviderName.OPENAI
-                    else "Stored locally in config.json. Sent only to your Azure endpoint."
+                    "Sends Authorization: Bearer when filled. Leave empty if auth "
+                    "uses custom headers."
+                    if is_compatible
+                    else (
+                        "Stored locally in config.json."
+                        if self.provider == RockyModelProviderName.OPENAI
+                        else "Stored locally in config.json. Sent only to your Azure endpoint."
+                    )
                 ),
                 obscure=True,
             ),
         ]
 
-        if self.provider == RockyModelProviderName.AZURE_OPENAI:
+        if self.provider in (
+            RockyModelProviderName.AZURE_OPENAI,
+            RockyModelProviderName.OPENAI_COMPATIBLE,
+        ):
             children.extend(
                 [
                     SizedBox(height=14),
                     RockySettingsField(
                         key=ValueKey(f"endpoint-{provider_name}"),
-                        label="Endpoint",
+                        label="Base URL" if is_compatible else "Endpoint",
                         value=self.endpoint,
                         on_changed=self._set_endpoint,
-                        hint_text="https://my-resource.openai.azure.com",
+                        hint_text=(
+                            "http://localhost:8000/v1"
+                            if is_compatible
+                            else "https://my-resource.openai.azure.com"
+                        ),
+                        helper=(
+                            "Use the base URL documented by the endpoint, usually "
+                            "ending in /v1."
+                            if is_compatible
+                            else None
+                        ),
                     ),
                 ]
             )
@@ -411,13 +563,42 @@ class _RockyModelProfileEditorState(State[RockyModelProfileEditor]):
                     label="Model",
                     value=self.name,
                     on_changed=self._set_name,
-                    hint_text="gpt-5.4",
-                    helper="Type any model identifier, or pick a suggestion below.",
+                    hint_text=("model-name" if is_compatible else "gpt-5.4"),
+                    helper=(
+                        "Type the model identifier served by this endpoint."
+                        if is_compatible
+                        else "Type any model identifier, or pick a suggestion below."
+                    ),
                 ),
-                SizedBox(height=8),
-                self._quick_picks(color_scheme, templates),
             ]
         )
+        if not is_compatible:
+            children.extend(
+                [
+                    SizedBox(height=8),
+                    self._quick_picks(color_scheme, templates),
+                ]
+            )
+
+        if is_compatible:
+            children.extend(
+                [
+                    SizedBox(height=14),
+                    RockySettingsField(
+                        key=ValueKey(f"headers-{provider_name}"),
+                        label="Custom headers",
+                        value=self.headers_text,
+                        on_changed=self._set_headers_text,
+                        hint_text="Header-Name: value",
+                        helper=(
+                            "Add only headers required by the endpoint; use "
+                            "Name: value lines or a JSON object."
+                        ),
+                        min_lines=2,
+                        max_lines=4,
+                    ),
+                ]
+            )
 
         if self.provider == RockyModelProviderName.AZURE_OPENAI:
             children.extend(
@@ -445,6 +626,22 @@ class _RockyModelProfileEditorState(State[RockyModelProfileEditor]):
                 definitions=RockyModelCapabilities.definitions(),
                 capabilities=self.capabilities,
                 on_changed=self._set_capabilities,
+            ),
+        ]
+
+    def _provider_description(self, color_scheme):
+        if self.provider != RockyModelProviderName.OPENAI_COMPATIBLE:
+            return []
+        return [
+            SizedBox(height=6),
+            Text(
+                "For endpoints that implement OpenAI Chat Completions or Responses "
+                "APIs, such as vLLM, llama.cpp, LM Studio, Ollama, OpenRouter, "
+                "Together AI, Groq, or DashScope.",
+                style=TextStyle(
+                    fontSize=11,
+                    color=color_scheme.onSurfaceVariant,
+                ),
             ),
         ]
 
@@ -482,6 +679,7 @@ class _RockyModelProfileEditorState(State[RockyModelProfileEditor]):
                 value=self.provider,
                 on_changed=self._set_provider,
             ),
+            *self._provider_description(color_scheme),
             SizedBox(height=18),
             *self._provider_specific(color_scheme),
             *self._capability_fields(),

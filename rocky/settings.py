@@ -226,6 +226,10 @@ class RockySettings(ChangeNotifier):
             if not model_profile.name:
                 return False, "Configure a LiteRT-LM model file in Settings."
             return True, None
+        if model_profile.provider == RockyModelProviderName.OPENAI_COMPATIBLE:
+            if not model_profile.name or not model_profile.endpoint:
+                return False, "Configure a model and endpoint in Settings."
+            return True, None
         if not model_profile.name or not model_profile.key:
             return False, "Configure a model in Settings."
         if (

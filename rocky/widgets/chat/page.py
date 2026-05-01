@@ -166,6 +166,10 @@ class RockyChatHeader(StatelessWidget):
             and not RockySystem.is_litert_lm_installed()
         )
         model_text = self._model_profile_model_text(model_profile)
+        subtitle_parts = [provider_label]
+        if RockyModelTemplates.supports_api_selection(model_profile.provider):
+            subtitle_parts.append(RockyModelTemplates.api_label(model_profile.api))
+        subtitle_parts.append(model_text)
         title_color = (
             color_scheme.onSurface.withOpacity(0.4)
             if is_disabled
@@ -204,7 +208,7 @@ class RockyChatHeader(StatelessWidget):
                                     ),
                                 ),
                                 Text(
-                                    f"{provider_label} \u00b7 {model_text}",
+                                    " \u00b7 ".join(subtitle_parts),
                                     style=TextStyle(
                                         fontSize=11,
                                         color=subtitle_color,
