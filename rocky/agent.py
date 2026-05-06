@@ -47,9 +47,11 @@ from rocky.agentic.tools.toolbox import RockyToolbox
 from rocky.agentic.tools.shell_provider import ShellProvider, ShellType
 from rocky.models.capabilities import RockyModelCapabilities
 from rocky.prompts.agent import (
-    ROCKY_AGENT_INSTRUCTIONS,
-    ROCKY_TITLE_SUMMARY_INSTRUCTIONS,
+    ROCKY_AGENT_IDENTITY,
+    ROCKY_AGENT_INSTRUCTION,
+    ROCKY_AGENT_PERSONALITY,
 )
+from rocky.prompts.app import ROCKY_TITLE_SUMMARY_INSTRUCTIONS
 from rocky.prompts.runtime import ROCKY_RUNTIME_DEVELOPER_MESSAGE_TEMPLATE
 from rocky.worker import RockyWorker, RockyWorkerEmitter
 from flut.flutter.foundation.change_notifier import ChangeNotifier
@@ -194,7 +196,13 @@ class RockyAgent(ChangeNotifier):
         async def _produce(emit: RockyWorkerEmitter[RockyAgentStreamEvent]) -> None:
             async with self._build_session(
                 config,
-                ROCKY_AGENT_INSTRUCTIONS,
+                "\n\n".join(
+                    [
+                        ROCKY_AGENT_IDENTITY,
+                        ROCKY_AGENT_PERSONALITY,
+                        ROCKY_AGENT_INSTRUCTION,
+                    ]
+                ),
                 "Rocky",
                 toolbox.as_sdk_tools(),
             ) as session:
