@@ -13,10 +13,12 @@ from flut.flutter.material import (
     Icons,
     InkWell,
     Material,
-    SelectableText,
+    SelectionArea,
     Theme,
 )
+from flut.flutter.gestures import TapGestureRecognizer
 from flut.flutter.painting import (
+    Alignment,
     Border,
     BorderRadius,
     BorderSide,
@@ -27,7 +29,9 @@ from flut.flutter.painting import (
     TextStyle,
 )
 from flut.flutter.rendering import CrossAxisAlignment, MainAxisSize
-from flut.flutter.services import SystemMouseCursors
+from flut.flutter.services import (
+    SystemMouseCursors,
+)
 from flut.flutter.widgets import (
     ClipRRect,
     Column,
@@ -37,6 +41,7 @@ from flut.flutter.widgets import (
     Image,
     MouseRegion,
     Row,
+    SelectionContainer,
     SizedBox,
     StatelessWidget,
     Text,
@@ -47,7 +52,10 @@ from rocky.system import RockySystem
 
 _HEADING_SIZES = {1: 20, 2: 18, 3: 16, 4: 15, 5: 14, 6: 14}
 _INLINE_IMAGE_MAX = 128.0
-_RUN_BLOCK_KINDS = frozenset({"paragraph", "heading", "bullet", "numbered", "task"})
+_LIST_MARKER_CHAR_WIDTH = 6.0
+_LIST_BLOCK_KINDS = frozenset({"bullet", "numbered", "task"})
+_LIST_SIBLING_GAP = 4
+_DEFAULT_BLOCK_GAP = 12
 
 _FENCE_PATTERN = re.compile(r"^\s*```(.*)$")
 _HEADING_PATTERN = re.compile(r"^(#{1,6})\s+(.*)$")
@@ -64,6 +72,8 @@ _TABLE_SEPARATOR_PATTERN = re.compile(
 _INLINE_PATTERN = re.compile(
     r"\\(?P<escape>[\\`*_{}\[\]()#+\-.!>~|])"
     r"|(?P<code_ticks>`+)(?P<code_body>.+?)(?P=code_ticks)"
+    r"|\*\*\*(?P<bolditalic>[^*\n]+?)\*\*\*"
+    r"|___(?P<bolditalic_u>[^_\n]+?)___"
     r"|\*\*(?P<bold>[^*\n]+?)\*\*"
     r"|__(?P<bold_u>[^_\n]+?)__"
     r"|~~(?P<strike>[^~\n]+?)~~"
@@ -93,72 +103,52 @@ class RockyMarkdown(StatelessWidget):
     def build(self, context):
         color_scheme = Theme.of(context).colorScheme
         blocks = _RockyMarkdownParser(self.content).parse()
+        selection_color = color_scheme.primary.withOpacity(0.28)
         renderer = _RockyMarkdownRenderer(
             base_style=self.base_style,
             color_scheme=color_scheme,
             selectable=self.selectable,
+            selection_color=selection_color,
         )
-        groups = _group_blocks(blocks)
         children = []
-        previous_last_block = None
-        for index, group in enumerate(groups):
-            first_block = group[0]
-            if previous_last_block is not None:
-                children.append(
-                    SizedBox(height=_block_gap(previous_last_block, first_block))
-                )
-            is_last = index == len(groups) - 1
+        previous_block = None
+        for index, block in enumerate(blocks):
+            if previous_block is not None:
+                children.append(SizedBox(height=_block_gap(previous_block, block)))
+            is_last = index == len(blocks) - 1
             attach_cursor = self.trailing_cursor and is_last
-            if first_block.kind in _RUN_BLOCK_KINDS:
-                children.append(
-                    renderer.render_run(group, trailing_cursor=attach_cursor)
-                )
-            elif attach_cursor:
+            if attach_cursor:
                 children.append(
                     Row(
                         crossAxisAlignment=CrossAxisAlignment.end,
                         mainAxisSize=MainAxisSize.min,
                         children=[
-                            Expanded(child=renderer.render(first_block)),
+                            Expanded(child=renderer.render(block)),
                             renderer.cursor_widget(),
                         ],
                     )
                 )
             else:
-                children.append(renderer.render(first_block))
-            previous_last_block = group[-1]
-        if self.trailing_cursor and not groups:
+                children.append(renderer.render(block))
+            previous_block = block
+        if self.trailing_cursor and not blocks:
             children.append(renderer.cursor_widget())
         if not children:
             return SizedBox(width=0, height=0)
-        return Column(
+        column = Column(
             crossAxisAlignment=CrossAxisAlignment.start,
             mainAxisSize=MainAxisSize.min,
             children=children,
         )
-
-
-def _group_blocks(blocks):
-    groups = []
-    run = []
-    for block in blocks:
-        if block.kind in _RUN_BLOCK_KINDS:
-            run.append(block)
-            continue
-        if run:
-            groups.append(run)
-            run = []
-        groups.append([block])
-    if run:
-        groups.append(run)
-    return groups
+        if self.selectable:
+            return SelectionArea(child=column)
+        return column
 
 
 def _block_gap(prev, curr):
-    tight_kinds = ("bullet", "numbered", "quote", "task")
-    if prev.kind in tight_kinds and curr.kind == prev.kind:
-        return 2
-    return 8
+    if curr.kind in _LIST_BLOCK_KINDS:
+        return _LIST_SIBLING_GAP
+    return _DEFAULT_BLOCK_GAP
 
 
 class _Block:
@@ -166,11 +156,11 @@ class _Block:
         "kind",
         "lines",
         "level",
-        "indent",
         "ordinals",
         "rows",
         "alignments",
         "checked",
+        "children",
     )
 
     def __init__(
@@ -179,20 +169,20 @@ class _Block:
         *,
         lines=None,
         level=0,
-        indent=0,
         ordinals=None,
         rows=None,
         alignments=None,
         checked=False,
+        children=None,
     ):
         self.kind = kind
         self.lines = lines if lines is not None else []
         self.level = level
-        self.indent = indent
         self.ordinals = ordinals if ordinals is not None else []
         self.rows = rows if rows is not None else []
         self.alignments = alignments if alignments is not None else []
         self.checked = checked
+        self.children = children if children is not None else []
 
 
 class _RockyMarkdownParser:
@@ -200,150 +190,167 @@ class _RockyMarkdownParser:
         self.content = content
 
     def parse(self):
-        blocks = []
-        current_paragraph = None
-        in_code = False
-        code_block = None
+        return _parse_blocks(self.content.split("\n"))
 
-        def flush_paragraph():
-            nonlocal current_paragraph
-            if current_paragraph is not None:
-                blocks.append(current_paragraph)
-                current_paragraph = None
 
-        lines = self.content.split("\n")
-        index = 0
-        while index < len(lines):
-            raw_line = lines[index]
-            if in_code:
-                if _FENCE_PATTERN.match(raw_line):
-                    blocks.append(code_block)
-                    in_code = False
-                else:
-                    code_block.lines.append(raw_line)
-                index += 1
-                continue
+def _parse_blocks(lines):
+    blocks = []
+    current_paragraph = None
+    in_code = False
+    code_block = None
 
-            fence = _FENCE_PATTERN.match(raw_line)
-            if fence:
-                flush_paragraph()
-                in_code = True
-                code_block = _Block("code")
-                index += 1
-                continue
+    def flush_paragraph():
+        nonlocal current_paragraph
+        if current_paragraph is not None:
+            blocks.append(current_paragraph)
+            current_paragraph = None
 
-            stripped = raw_line.strip()
-            if not stripped:
-                flush_paragraph()
-                index += 1
-                continue
-
-            if _RULE_PATTERN.match(raw_line):
-                flush_paragraph()
-                blocks.append(_Block("rule"))
-                index += 1
-                continue
-
-            if (
-                _TABLE_ROW_PATTERN.match(raw_line)
-                and index + 1 < len(lines)
-                and _TABLE_SEPARATOR_PATTERN.match(lines[index + 1])
-            ):
-                flush_paragraph()
-                table_block, consumed = self._consume_table(lines, index)
-                blocks.append(table_block)
-                index += consumed
-                continue
-
-            heading = _HEADING_PATTERN.match(raw_line)
-            if heading:
-                flush_paragraph()
-                blocks.append(
-                    _Block(
-                        "heading",
-                        lines=[heading.group(2)],
-                        level=len(heading.group(1)),
-                    )
-                )
-                index += 1
-                continue
-
-            bullet = _BULLET_PATTERN.match(raw_line)
-            if bullet:
-                flush_paragraph()
-                body = bullet.group(3)
-                indent = len(bullet.group(1)) // 2
-                task = _TASK_PATTERN.match(body)
-                if task:
-                    blocks.append(
-                        _Block(
-                            "task",
-                            lines=[task.group(2)],
-                            indent=indent,
-                            checked=task.group(1) in ("x", "X"),
-                        )
-                    )
-                else:
-                    blocks.append(
-                        _Block(
-                            "bullet",
-                            lines=[body],
-                            indent=indent,
-                        )
-                    )
-                index += 1
-                continue
-
-            numbered = _NUMBERED_PATTERN.match(raw_line)
-            if numbered:
-                flush_paragraph()
-                blocks.append(
-                    _Block(
-                        "numbered",
-                        lines=[numbered.group(3)],
-                        indent=len(numbered.group(1)) // 2,
-                        ordinals=[int(numbered.group(2))],
-                    )
-                )
-                index += 1
-                continue
-
-            quote = _QUOTE_PATTERN.match(raw_line)
-            if quote:
-                if blocks and blocks[-1].kind == "quote" and current_paragraph is None:
-                    blocks[-1].lines.append(quote.group(1))
-                else:
-                    flush_paragraph()
-                    blocks.append(_Block("quote", lines=[quote.group(1)]))
-                index += 1
-                continue
-
-            if current_paragraph is None:
-                current_paragraph = _Block("paragraph", lines=[stripped])
-            else:
-                current_paragraph.lines.append(stripped)
-            index += 1
-
-        flush_paragraph()
+    index = 0
+    while index < len(lines):
+        raw_line = lines[index]
         if in_code:
-            blocks.append(code_block)
-        return blocks
+            if _FENCE_PATTERN.match(raw_line):
+                blocks.append(code_block)
+                in_code = False
+            else:
+                code_block.lines.append(raw_line)
+            index += 1
+            continue
 
-    @staticmethod
-    def _consume_table(lines, start):
-        header_cells = _split_table_row(lines[start])
-        alignments = _parse_alignment_row(lines[start + 1], len(header_cells))
-        rows = [header_cells]
-        cursor = start + 2
-        while cursor < len(lines) and _TABLE_ROW_PATTERN.match(lines[cursor]):
-            row_cells = _split_table_row(lines[cursor])
-            if len(row_cells) < len(header_cells):
-                row_cells = row_cells + [""] * (len(header_cells) - len(row_cells))
-            elif len(row_cells) > len(header_cells):
-                row_cells = row_cells[: len(header_cells)]
-            rows.append(row_cells)
-            cursor += 1
-        return _Block("table", rows=rows, alignments=alignments), cursor - start
+        fence = _FENCE_PATTERN.match(raw_line)
+        if fence:
+            flush_paragraph()
+            in_code = True
+            code_block = _Block("code")
+            index += 1
+            continue
+
+        stripped = raw_line.strip()
+        if not stripped:
+            flush_paragraph()
+            index += 1
+            continue
+
+        if _RULE_PATTERN.match(raw_line):
+            flush_paragraph()
+            blocks.append(_Block("rule"))
+            index += 1
+            continue
+
+        if (
+            _TABLE_ROW_PATTERN.match(raw_line)
+            and index + 1 < len(lines)
+            and _TABLE_SEPARATOR_PATTERN.match(lines[index + 1])
+        ):
+            flush_paragraph()
+            table_block, consumed = _consume_table(lines, index)
+            blocks.append(table_block)
+            index += consumed
+            continue
+
+        heading = _HEADING_PATTERN.match(raw_line)
+        if heading:
+            flush_paragraph()
+            blocks.append(
+                _Block(
+                    "heading",
+                    lines=[heading.group(2)],
+                    level=len(heading.group(1)),
+                )
+            )
+            index += 1
+            continue
+
+        bullet = _BULLET_PATTERN.match(raw_line)
+        numbered = None if bullet else _NUMBERED_PATTERN.match(raw_line)
+        if bullet or numbered:
+            flush_paragraph()
+            if bullet:
+                leading = len(bullet.group(1))
+                marker_len = 2  # marker char + single space
+                first_body = bullet.group(3)
+                task = _TASK_PATTERN.match(first_body)
+                if task:
+                    kind = "task"
+                    checked = task.group(1) in ("x", "X")
+                    first_body = task.group(2)
+                else:
+                    kind = "bullet"
+                    checked = False
+                ordinals = []
+            else:
+                leading = len(numbered.group(1))
+                num_str = numbered.group(2)
+                marker_len = len(num_str) + 2  # digits + ". "
+                first_body = numbered.group(3)
+                kind = "numbered"
+                checked = False
+                ordinals = [int(num_str)]
+
+            content_column = leading + marker_len
+            item_lines = [first_body]
+            next_index = index + 1
+            while next_index < len(lines):
+                nxt = lines[next_index]
+                if not nxt.strip():
+                    item_lines.append("")
+                    next_index += 1
+                    continue
+                lead = len(nxt) - len(nxt.lstrip(" "))
+                if lead >= content_column:
+                    item_lines.append(nxt[content_column:])
+                    next_index += 1
+                    continue
+                break
+            while item_lines and not item_lines[-1].strip():
+                item_lines.pop()
+            blocks.append(
+                _Block(
+                    kind,
+                    children=_parse_blocks(item_lines),
+                    ordinals=ordinals,
+                    checked=checked,
+                )
+            )
+            index = next_index
+            continue
+
+        quote = _QUOTE_PATTERN.match(raw_line)
+        if quote:
+            if blocks and blocks[-1].kind == "quote" and current_paragraph is None:
+                blocks[-1].lines.append(quote.group(1))
+            else:
+                flush_paragraph()
+                blocks.append(_Block("quote", lines=[quote.group(1)]))
+            index += 1
+            continue
+
+        if current_paragraph is None:
+            current_paragraph = _Block("paragraph", lines=[stripped])
+        else:
+            current_paragraph.lines.append(stripped)
+        index += 1
+
+    flush_paragraph()
+    if in_code:
+        blocks.append(code_block)
+    return blocks
+
+
+def _consume_table(lines, start):
+    header_cells = _split_table_row(lines[start])
+    alignments = _parse_alignment_row(lines[start + 1], len(header_cells))
+    rows = [header_cells]
+    cursor = start + 2
+    while cursor < len(lines) and _TABLE_ROW_PATTERN.match(lines[cursor]):
+        row_cells = _split_table_row(lines[cursor])
+        if len(row_cells) < len(header_cells):
+            row_cells = row_cells + [""] * (len(header_cells) - len(row_cells))
+        elif len(row_cells) > len(header_cells):
+            row_cells = row_cells[: len(header_cells)]
+        rows.append(row_cells)
+        cursor += 1
+    return _Block("table", rows=rows, alignments=alignments), cursor - start
 
 
 def _split_table_row(line):
@@ -398,27 +405,42 @@ def _parse_alignment_row(line, expected_count):
     return alignments[:expected_count]
 
 
+def _list_marker_width(block):
+    if block.kind == "numbered":
+        ordinal = block.ordinals[0] if block.ordinals else 1
+        return max(3, len(f"{ordinal}."))
+    return 3
+
+
+def _line_height(style):
+    font_size = style.fontSize or 14
+    return max(font_size * (style.height or 1.0), font_size + 2)
+
+
 class _RockyMarkdownRenderer:
-    def __init__(self, *, base_style: TextStyle, color_scheme, selectable: bool):
+    def __init__(
+        self, *, base_style: TextStyle, color_scheme, selectable: bool, selection_color
+    ):
         self.base_style = base_style
         self.color_scheme = color_scheme
         self.selectable = selectable
+        self.selection_color = selection_color
 
     def render(self, block):
         if block.kind == "heading":
             return self._render_heading(block)
         if block.kind == "bullet":
             return self._render_list_item(
-                block, marker=TextSpan(text="\u2022  ", style=self.base_style)
+                block, marker=Text("\u2022", style=self.base_style)
             )
         if block.kind == "task":
             return self._render_list_item(
-                block, marker=self._task_checkbox_span(block.checked)
+                block, marker=self._task_checkbox_widget(block.checked)
             )
         if block.kind == "numbered":
             ordinal = block.ordinals[0] if block.ordinals else 1
             return self._render_list_item(
-                block, marker=TextSpan(text=f"{ordinal}.  ", style=self.base_style)
+                block, marker=Text(f"{ordinal}.", style=self.base_style)
             )
         if block.kind == "code":
             return self._render_code_block(block)
@@ -430,24 +452,6 @@ class _RockyMarkdownRenderer:
             return self._render_table(block)
         return self._render_paragraph(block)
 
-    def render_run(self, blocks, *, trailing_cursor: bool = False):
-        children = []
-        for index, block in enumerate(blocks):
-            if index > 0:
-                previous = blocks[index - 1]
-                tight = (
-                    previous.kind in ("bullet", "numbered", "task")
-                    and block.kind == previous.kind
-                )
-                children.append(TextSpan(text="\n" if tight else "\n\n"))
-            children.append(self._block_span(block))
-        if trailing_cursor:
-            children.append(self.cursor_span())
-        root = TextSpan(style=self.base_style, children=children)
-        if self.selectable:
-            return SelectableText.rich(root, style=self.base_style)
-        return Text.rich(root, style=self.base_style)
-
     def cursor_widget(self):
         height = self.base_style.fontSize
         return Container(
@@ -457,44 +461,8 @@ class _RockyMarkdownRenderer:
             color=self.color_scheme.primary,
         )
 
-    def cursor_span(self):
-        return WidgetSpan(
-            alignment=PlaceholderAlignment.middle,
-            child=self.cursor_widget(),
-        )
-
-    def _block_span(self, block):
-        if block.kind == "heading":
-            text = block.lines[0] if block.lines else ""
-            return TextSpan(
-                style=TextStyle(
-                    color=self.base_style.color,
-                    fontSize=_HEADING_SIZES.get(block.level, 14),
-                    fontWeight=FontWeight.w700,
-                ),
-                children=self._inline_spans(text),
-            )
-        if block.kind in ("bullet", "numbered", "task"):
-            text = " ".join(line.strip() for line in block.lines)
-            indent_prefix = "    " * max(0, block.indent)
-            children = []
-            if indent_prefix:
-                children.append(TextSpan(text=indent_prefix))
-            if block.kind == "task":
-                children.append(self._task_checkbox_span(block.checked))
-                children.append(TextSpan(text=" "))
-            elif block.kind == "bullet":
-                children.append(TextSpan(text="\u2022  "))
-            else:
-                ordinal = block.ordinals[0] if block.ordinals else 1
-                children.append(TextSpan(text=f"{ordinal}.  "))
-            children.extend(self._inline_spans(text))
-            return TextSpan(style=self.base_style, children=children)
-        text = " ".join(line.strip() for line in block.lines)
-        return TextSpan(style=self.base_style, children=self._inline_spans(text))
-
     def _render_paragraph(self, block):
-        text = " ".join(line.strip() for line in block.lines)
+        text = "\n".join(line.strip() for line in block.lines)
         return self._rich_text(self._inline_spans(text), style=self.base_style)
 
     def _render_heading(self, block):
@@ -506,31 +474,48 @@ class _RockyMarkdownRenderer:
         return self._rich_text(self._inline_spans(block.lines[0]), style=style)
 
     def _render_list_item(self, block, *, marker):
-        text = " ".join(line.strip() for line in block.lines)
-        spans = [marker] + self._inline_spans(text)
-        rich = self._rich_text(spans, style=self.base_style)
-        if block.indent <= 0:
-            return rich
-        return Container(
-            padding=EdgeInsets.only(left=16.0 * block.indent),
-            child=rich,
+        marker_column = Container(
+            width=_list_marker_width(block) * _LIST_MARKER_CHAR_WIDTH,
+            height=_line_height(self.base_style),
+            alignment=Alignment.centerLeft,
+            child=marker,
+        )
+        body_children = []
+        for index, child in enumerate(block.children):
+            if index > 0:
+                body_children.append(SizedBox(height=_LIST_SIBLING_GAP))
+            body_children.append(self.render(child))
+        if not body_children:
+            return marker_column
+        return Row(
+            crossAxisAlignment=CrossAxisAlignment.start,
+            children=[
+                marker_column,
+                Expanded(
+                    child=Column(
+                        crossAxisAlignment=CrossAxisAlignment.start,
+                        mainAxisSize=MainAxisSize.min,
+                        children=body_children,
+                    )
+                ),
+            ],
         )
 
     def _task_checkbox_span(self, checked):
-        icon_data = Icons.check_box if checked else Icons.check_box_outline_blank
-        size = (self.base_style.fontSize or 14) + 2
         return WidgetSpan(
             alignment=PlaceholderAlignment.middle,
-            child=Container(
-                margin=EdgeInsets.only(right=6),
-                child=Icon(
-                    icon_data,
-                    size=size,
-                    color=(
-                        self.color_scheme.primary
-                        if checked
-                        else self.color_scheme.outline
-                    ),
+            child=self._task_checkbox_widget(checked),
+        )
+
+    def _task_checkbox_widget(self, checked):
+        icon_data = Icons.check_box if checked else Icons.check_box_outline_blank
+        size = (self.base_style.fontSize or 14) + 2
+        return SelectionContainer.disabled(
+            child=Icon(
+                icon_data,
+                size=size,
+                color=(
+                    self.color_scheme.primary if checked else self.color_scheme.outline
                 ),
             ),
         )
@@ -539,16 +524,11 @@ class _RockyMarkdownRenderer:
         body = "\n".join(block.lines)
         style = TextStyle(
             color=self.base_style.color,
-            fontSize=12.5,
+            fontSize=self.base_style.fontSize,
             fontFamily=RockySystem.monospace_font_family(),
             fontFamilyFallback=RockySystem.monospace_font_family_fallback(),
-            height=1.35,
         )
-        text_widget = (
-            SelectableText(body, style=style)
-            if self.selectable
-            else Text(body, style=style)
-        )
+        text_widget = Text(body, style=style, selectionColor=self.selection_color)
         return Container(
             padding=EdgeInsets.symmetric(horizontal=10, vertical=8),
             decoration=BoxDecoration(
@@ -585,9 +565,7 @@ class _RockyMarkdownRenderer:
 
     def _rich_text(self, children, *, style):
         root = TextSpan(style=style, children=children)
-        if self.selectable:
-            return SelectableText.rich(root, style=style)
-        return Text.rich(root, style=style)
+        return Text.rich(root, style=style, selectionColor=self.selection_color)
 
     def _inline_spans(self, text, *, style_override=None):
         spans = []
@@ -599,6 +577,19 @@ class _RockyMarkdownRenderer:
                 spans.append(TextSpan(text=match.group("escape")))
             elif match.group("code_body") is not None:
                 spans.append(self._inline_code_span(match.group("code_body")))
+            elif (
+                match.group("bolditalic") is not None
+                or match.group("bolditalic_u") is not None
+            ):
+                spans.append(
+                    TextSpan(
+                        text=match.group("bolditalic") or match.group("bolditalic_u"),
+                        style=TextStyle(
+                            fontWeight=FontWeight.w700,
+                            fontStyle=FontStyle.italic,
+                        ),
+                    )
+                )
             elif match.group("bold") is not None or match.group("bold_u") is not None:
                 spans.append(
                     TextSpan(
@@ -649,7 +640,7 @@ class _RockyMarkdownRenderer:
         return spans
 
     def _inline_code_span(self, body):
-        mono_style = TextStyle(
+        code_style = TextStyle(
             color=self.base_style.color,
             fontSize=self.base_style.fontSize,
             fontFamily=RockySystem.monospace_font_family(),
@@ -659,38 +650,28 @@ class _RockyMarkdownRenderer:
         return WidgetSpan(
             alignment=PlaceholderAlignment.middle,
             child=Container(
-                padding=EdgeInsets.fromLTRB(5, 0, 2, 0),
-                margin=EdgeInsets.fromLTRB(1, 0, 1, 0),
+                padding=EdgeInsets.symmetric(horizontal=5, vertical=1),
                 decoration=BoxDecoration(
-                    color=self.color_scheme.surfaceContainerHighest,
+                    color=self.color_scheme.surfaceContainerHighest.withOpacity(0.72),
                     borderRadius=BorderRadius.circular(4),
                 ),
-                child=(
-                    SelectableText(body, style=mono_style)
-                    if self.selectable
-                    else Text(body, style=mono_style)
-                ),
+                child=Text(body, style=code_style),
             ),
         )
 
     def _link_span(self, *, text, url):
+        recognizer = TapGestureRecognizer()
+        recognizer.onTap = lambda: RockySystem.open_url(url)
         link_style = TextStyle(
             color=self.color_scheme.primary,
             decoration=TextDecoration.underline,
             fontSize=self.base_style.fontSize,
         )
-        return WidgetSpan(
-            alignment=PlaceholderAlignment.middle,
-            child=MouseRegion(
-                cursor=SystemMouseCursors.click,
-                child=Material(
-                    color=Colors.transparent,
-                    child=InkWell(
-                        onTap=lambda: RockySystem.open_url(url),
-                        child=Text(text, style=link_style),
-                    ),
-                ),
-            ),
+        return TextSpan(
+            text=text,
+            style=link_style,
+            recognizer=recognizer,
+            mouseCursor=SystemMouseCursors.click,
         )
 
     def _image_span(self, *, alt, url):
@@ -699,25 +680,27 @@ class _RockyMarkdownRenderer:
             return self._link_span(text=f"\U0001f5bc {alt or url}", url=url)
         return WidgetSpan(
             alignment=PlaceholderAlignment.middle,
-            child=MouseRegion(
-                cursor=SystemMouseCursors.click,
-                child=Material(
-                    color=Colors.transparent,
-                    child=InkWell(
-                        onTap=lambda: RockySystem.open_url(url),
-                        borderRadius=BorderRadius.circular(4),
-                        child=Container(
-                            margin=EdgeInsets.symmetric(horizontal=2, vertical=2),
-                            decoration=BoxDecoration(
-                                borderRadius=BorderRadius.circular(4),
-                                border=Border.all(
-                                    width=1,
-                                    color=self.color_scheme.outlineVariant,
+            child=SelectionContainer.disabled(
+                child=MouseRegion(
+                    cursor=SystemMouseCursors.click,
+                    child=Material(
+                        color=Colors.transparent,
+                        child=InkWell(
+                            onTap=lambda: RockySystem.open_url(url),
+                            borderRadius=BorderRadius.circular(4),
+                            child=Container(
+                                margin=EdgeInsets.symmetric(horizontal=2, vertical=2),
+                                decoration=BoxDecoration(
+                                    borderRadius=BorderRadius.circular(4),
+                                    border=Border.all(
+                                        width=1,
+                                        color=self.color_scheme.outlineVariant,
+                                    ),
                                 ),
-                            ),
-                            child=ClipRRect(
-                                borderRadius=BorderRadius.circular(3),
-                                child=image_widget,
+                                child=ClipRRect(
+                                    borderRadius=BorderRadius.circular(3),
+                                    child=image_widget,
+                                ),
                             ),
                         ),
                     ),
@@ -821,6 +804,9 @@ class _RockyMarkdownRenderer:
         }.get(alignment, TextAlign.left)
         spans = self._inline_spans(text)
         root = TextSpan(style=cell_style, children=spans)
-        if self.selectable:
-            return SelectableText.rich(root, style=cell_style, textAlign=text_align)
-        return Text.rich(root, style=cell_style, textAlign=text_align)
+        return Text.rich(
+            root,
+            style=cell_style,
+            textAlign=text_align,
+            selectionColor=self.selection_color,
+        )
