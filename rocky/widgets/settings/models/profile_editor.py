@@ -5,14 +5,12 @@ from typing import Optional
 from flut.dart.ui import FontWeight, Radius, TextAlign
 from flut.flutter.material import (
     Colors,
-    Dialog,
     ElevatedButton,
     Icons,
     InkWell,
     Material,
     OutlinedButton,
     Theme,
-    showDialog,
 )
 from flut.flutter.painting import (
     Border,
@@ -31,11 +29,9 @@ from flut.flutter.widgets import (
     SizedBox,
     State,
     StatefulWidget,
-    StatelessWidget,
     Text,
     Wrap,
 )
-from flut.flutter.widgets.navigator import Navigator
 from flut.flutter.foundation.key import ValueKey
 
 from rocky.contracts.model import (
@@ -47,7 +43,6 @@ from rocky.contracts.model import (
 from rocky.models.capabilities import RockyModelCapabilities
 from rocky.models.templates import RockyModelTemplates
 from rocky.system import RockySystem
-from rocky.widgets.dialog import RockyDialog
 from rocky.widgets.settings.field import RockySettingsField
 from rocky.widgets.settings.models.capabilities import RockyModelCapabilityFields
 from rocky.widgets.settings.models.provider_picker import RockyProviderPicker
@@ -136,17 +131,6 @@ class _RockyModelProfileEditorState(State[RockyModelProfileEditor]):
                 return typed
         return self._derived_display_name()
 
-    def _set_provider(self, provider):
-        if (
-            provider == RockyModelProviderName.LITERTLM
-            and not RockySystem.is_litert_lm_installed()
-        ):
-            self._show_litertlm_warning(
-                on_continue=lambda: self._apply_provider(provider),
-            )
-            return
-        self._apply_provider(provider)
-
     def _apply_provider(self, provider):
         def _apply():
             self.provider = provider
@@ -166,24 +150,6 @@ class _RockyModelProfileEditorState(State[RockyModelProfileEditor]):
             self.error = None
 
         self.setState(_apply)
-
-    def _show_litertlm_warning(self, *, on_continue):
-        context = self.context
-        showDialog(
-            context=context,
-            barrierColor=Colors.grey800.withOpacity(0.8),
-            builder=lambda dialog_context: Dialog(
-                backgroundColor=Colors.transparent,
-                insetPadding=EdgeInsets.all(40),
-                child=_LiteRtLmMissingDialog(
-                    on_cancel=lambda: Navigator.pop(dialog_context),
-                    on_continue=lambda: (
-                        Navigator.pop(dialog_context),
-                        on_continue(),
-                    ),
-                ),
-            ),
-        )
 
     def _set_display_name(self, value):
         self.display_name = value
@@ -274,12 +240,6 @@ class _RockyModelProfileEditorState(State[RockyModelProfileEditor]):
             self._parse_headers()
         except ValueError as error:
             self._set_error(str(error))
-            return
-        if (
-            self.provider == RockyModelProviderName.LITERTLM
-            and not RockySystem.is_litert_lm_installed()
-        ):
-            self._show_litertlm_warning(on_continue=self._save)
             return
         self._save()
 
@@ -677,7 +637,7 @@ class _RockyModelProfileEditorState(State[RockyModelProfileEditor]):
             SizedBox(height=6),
             RockyProviderPicker(
                 value=self.provider,
-                on_changed=self._set_provider,
+                on_changed=self._apply_provider,
             ),
             *self._provider_description(color_scheme),
             SizedBox(height=18),
@@ -732,76 +692,4 @@ class _RockyModelProfileEditorState(State[RockyModelProfileEditor]):
                 crossAxisAlignment=CrossAxisAlignment.stretch,
                 children=children,
             ),
-        )
-
-
-class _LiteRtLmMissingDialog(StatelessWidget):
-    def __init__(self, *, on_cancel, on_continue, key=None):
-        super().__init__(key=key)
-        self.on_cancel = on_cancel
-        self.on_continue = on_continue
-
-    def build(self, context):
-        color_scheme = Theme.of(context).colorScheme
-        body = Container(
-            width=420,
-            padding=EdgeInsets.all(20),
-            child=Column(
-                mainAxisSize=MainAxisSize.min,
-                crossAxisAlignment=CrossAxisAlignment.start,
-                children=[
-                    Text(
-                        "To run LiteRT-LM models, install the runtime:",
-                        style=TextStyle(
-                            fontSize=12,
-                            color=color_scheme.onSurface,
-                        ),
-                    ),
-                    SizedBox(height=8),
-                    Container(
-                        padding=EdgeInsets.symmetric(horizontal=10, vertical=8),
-                        decoration=BoxDecoration(
-                            color=color_scheme.surfaceContainerHighest,
-                            borderRadius=BorderRadius.circular(6),
-                        ),
-                        child=Text(
-                            "pip install litert-lm",
-                            style=TextStyle(
-                                fontSize=12,
-                                color=color_scheme.onSurface,
-                            ),
-                        ),
-                    ),
-                    SizedBox(height=10),
-                    Text(
-                        "You can continue and configure the profile now; chats will be unavailable until the runtime is installed.",
-                        style=TextStyle(
-                            fontSize=12,
-                            color=color_scheme.onSurfaceVariant,
-                        ),
-                    ),
-                    SizedBox(height=20),
-                    Row(
-                        mainAxisAlignment=MainAxisAlignment.end,
-                        children=[
-                            OutlinedButton(
-                                onPressed=self.on_cancel,
-                                child=Text("Cancel"),
-                            ),
-                            SizedBox(width=10),
-                            ElevatedButton(
-                                onPressed=self.on_continue,
-                                child=Text("Continue anyway"),
-                            ),
-                        ],
-                    ),
-                ],
-            ),
-        )
-        return RockyDialog(
-            title="LiteRT-LM is not installed",
-            leading_icon=Icons.info_outline,
-            mode="fit_content",
-            on_close=self.on_cancel,
-            body=body,
         )

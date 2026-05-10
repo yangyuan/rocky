@@ -28,8 +28,8 @@ from flut.flutter.widgets import (
     Wrap,
 )
 
+from rocky.contracts.chat import RockyChatFileContentPart
 from rocky.services.attachments import RockyAttachments
-from rocky.contracts.chat import RockyAttachment
 from rocky.system import RockySystem
 
 
@@ -51,12 +51,12 @@ class RockyAttachmentPicker:
     ]
 
     @classmethod
-    def pick(cls) -> list[RockyAttachment]:
+    def pick(cls) -> list[RockyChatFileContentPart]:
         paths = RockySystem.tk_select_files_with_types(
             title="Attach files",
             filetypes=cls._FILETYPES,
         )
-        results: list[RockyAttachment] = []
+        results: list[RockyChatFileContentPart] = []
         for raw_path in paths:
             attachment = RockyAttachments.load(Path(raw_path))
             if attachment is not None:
@@ -68,7 +68,7 @@ class RockyAttachmentChip(StatelessWidget):
     def __init__(
         self,
         *,
-        attachment: RockyAttachment,
+        attachment: RockyChatFileContentPart,
         on_remove: Optional[Callable[[], None]] = None,
         key=None,
     ):
@@ -149,7 +149,7 @@ class RockyAttachmentComposerStrip(StatelessWidget):
     def __init__(
         self,
         *,
-        attachments: list[RockyAttachment],
+        attachments: list[RockyChatFileContentPart],
         on_remove: Optional[Callable[[int], None]] = None,
         key=None,
     ):
@@ -181,7 +181,7 @@ class RockyAttachmentBubbleStrip(StatelessWidget):
     def __init__(
         self,
         *,
-        attachments: list[RockyAttachment],
+        attachments: list[RockyChatFileContentPart],
         key=None,
     ):
         super().__init__(key=key)
@@ -192,7 +192,7 @@ class RockyAttachmentBubbleStrip(StatelessWidget):
             return SizedBox(width=0, height=0)
         color_scheme = Theme.of(context).colorScheme
         items = []
-        for attachment in self.attachments:
+        for index, attachment in enumerate(self.attachments):
             if RockyAttachments.is_image(attachment):
                 items.append(
                     ClipRRect(
@@ -203,7 +203,9 @@ class RockyAttachmentBubbleStrip(StatelessWidget):
                             height=120,
                             gaplessPlayback=True,
                             excludeFromSemantics=True,
-                            key=ValueKey(f"attachment_image_{attachment.filename}"),
+                            key=ValueKey(
+                                f"attachment_image_{index}_{attachment.filename}"
+                            ),
                         ),
                     )
                 )

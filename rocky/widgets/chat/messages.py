@@ -1,5 +1,7 @@
-import json
+import base64
+from typing import Optional
 
+from flut.dart.typed_data import Uint8List
 from flut.dart.ui import FontWeight
 from flut.flutter.foundation.key import ValueKey
 from flut.flutter.material import (
@@ -8,6 +10,7 @@ from flut.flutter.material import (
     InkWell,
     Material,
     SelectableText,
+    SelectionArea,
     Theme,
 )
 from flut.flutter.painting import (
@@ -21,11 +24,13 @@ from flut.flutter.rendering import CrossAxisAlignment, MainAxisAlignment
 from flut.flutter.rendering.box import BoxConstraints
 from flut.flutter.scheduler import SchedulerBinding
 from flut.flutter.widgets import (
+    ClipRRect,
     Column,
     ConstrainedBox,
     Container,
     Flexible,
     Icon,
+    Image,
     ListView,
     Row,
     ScrollController,
@@ -35,12 +40,18 @@ from flut.flutter.widgets import (
     StatefulWidget,
     StatelessWidget,
     Text,
+    Wrap,
 )
 
 from rocky.contracts.chat import (
+    RockyChatContent,
+    RockyChatFileContentPart,
+    RockyChatImageContentPart,
     RockyChatMessage,
+    RockyChatTextContentPart,
     RockyToolCall,
 )
+from rocky.services.attachments import RockyAttachments
 from rocky.system import RockySystem
 from rocky.widgets.chat.attachments import RockyAttachmentBubbleStrip
 from rocky.widgets.rendering.markdown import RockyMarkdown
@@ -49,6 +60,27 @@ CHAT_FONT_SIZE = 14
 CHAT_LINE_HEIGHT = 1.5
 METADATA_FONT_SIZE = 12
 TOOL_CONTENT_MAX_HEIGHT = 180
+
+
+def _image_from_data_url(image_url: str, key: str):
+    if not image_url.startswith("data:") or "," not in image_url:
+        return None
+    _header, data = image_url.split(",", 1)
+    try:
+        raw = base64.b64decode(data)
+    except (ValueError, base64.binascii.Error):
+        return None
+    return ClipRRect(
+        borderRadius=BorderRadius.circular(6),
+        child=Image.memory(
+            Uint8List(raw),
+            width=120,
+            height=120,
+            gaplessPlayback=True,
+            excludeFromSemantics=True,
+            key=ValueKey(key),
+        ),
+    )
 
 
 class _BubbleUpgradeQueue:
@@ -218,14 +250,12 @@ class RockyChatBubble(StatefulWidget):
         self,
         *,
         role: str,
-        content,
-        attachments=(),
+        content: Optional[RockyChatContent],
         key=None,
     ):
         super().__init__(key=key)
         self.role = role
-        self.content = content or ""
-        self.attachments = list(attachments or [])
+        self.content = content if content is not None else ""
 
     def createState(self):
         return _RockyChatBubbleState()
@@ -267,30 +297,39 @@ class _RockyChatBubbleState(State[RockyChatBubble]):
         )
         is_user = self.widget.role == "user"
         show_markdown = not is_user and self._ready and self._rendered
+        content_text = self._text_content(self.widget.content)
 
         if is_user:
-            text_widget = SelectableText(self.widget.content, style=base_style)
-            if self.widget.attachments:
+            attachments = self._image_file_attachments(self.widget.content)
+            images = self._image_content_children(self.widget.content)
+            text_widget = SelectableText(content_text, style=base_style)
+            if attachments or images:
+                children = []
+                if attachments:
+                    children.append(
+                        RockyAttachmentBubbleStrip(
+                            attachments=attachments,
+                        )
+                    )
+                if images:
+                    children.append(Wrap(spacing=6, runSpacing=6, children=images))
+                if content_text:
+                    children.append(text_widget)
                 child = Column(
                     crossAxisAlignment=CrossAxisAlignment.start,
-                    children=[
-                        RockyAttachmentBubbleStrip(
-                            attachments=self.widget.attachments,
-                        ),
-                        text_widget,
-                    ],
+                    children=children,
                 )
             else:
                 child = text_widget
             metadata_action = None
         elif show_markdown:
-            child = RockyMarkdown(content=self.widget.content, base_style=base_style)
+            child = RockyMarkdown(content=content_text, base_style=base_style)
             metadata_action = RockyMarkdownToggleButton(
                 rendered=True,
                 on_toggle=self._toggle,
             )
         else:
-            child = SelectableText(self.widget.content, style=base_style)
+            child = SelectableText(content_text, style=base_style)
             metadata_action = RockyMarkdownToggleButton(
                 rendered=self._rendered,
                 on_toggle=self._toggle,
@@ -302,11 +341,45 @@ class _RockyChatBubbleState(State[RockyChatBubble]):
             metadata_action=metadata_action,
         )
 
+    def _text_content(self, content: RockyChatContent) -> str:
+        if isinstance(content, str):
+            return content
+        parts: list[str] = []
+        for part in content:
+            if isinstance(part, RockyChatTextContentPart):
+                parts.append(part.text)
+        return "\n".join(parts)
+
+    def _image_file_attachments(
+        self,
+        content: RockyChatContent,
+    ) -> list[RockyChatFileContentPart]:
+        if not isinstance(content, list):
+            return []
+        attachments: list[RockyChatFileContentPart] = []
+        for part in content:
+            if isinstance(part, RockyChatFileContentPart) and RockyAttachments.is_image(
+                part
+            ):
+                attachments.append(part)
+        return attachments
+
+    def _image_content_children(self, content: RockyChatContent) -> list:
+        if not isinstance(content, list):
+            return []
+        children = []
+        for index, part in enumerate(content):
+            if isinstance(part, RockyChatImageContentPart):
+                image = _image_from_data_url(part.image_url, f"image_{index}")
+                if image is not None:
+                    children.append(image)
+        return children
+
 
 class _RockyAssistantStreamingBubble(StatefulWidget):
-    def __init__(self, *, message, stream_notifier, key=None):
+    def __init__(self, *, content: str, stream_notifier, key=None):
         super().__init__(key=key)
-        self.message = message
+        self.content = content
         self.stream_notifier = stream_notifier
 
     def createState(self):
@@ -343,7 +416,7 @@ class _RockyAssistantStreamingBubbleState(State[_RockyAssistantStreamingBubble])
             height=CHAT_LINE_HEIGHT,
             color=text_color,
         )
-        content = self.widget.message.content or ""
+        content = self.widget.content
         if self._rendered:
             child = RockyMarkdown(
                 content=content,
@@ -400,29 +473,15 @@ class _RockyExecutedToolsState(State[RockyExecutedTools]):
         self.setState(_flip)
 
     def _running(self) -> bool:
-        return any(not tool.completed for tool in self.widget.message.tool_calls)
+        return any(not tool.completed for tool in self.widget.message.tool_calls or [])
 
     def _title(self) -> str:
         return "Executing Tools" if self._running() else "Executed Tools"
 
     def _count_label(self) -> str:
-        count = len(self.widget.message.tool_calls)
+        count = len(self.widget.message.tool_calls or [])
         noun = "tool" if count == 1 else "tools"
         return f"{count} {noun}"
-
-    def _format_value(self, value: object) -> str:
-        if value is None:
-            return ""
-        if isinstance(value, str):
-            return value
-        if isinstance(value, int | float | bool):
-            return str(value)
-        if isinstance(value, dict | list | tuple):
-            try:
-                return json.dumps(value, indent=2, ensure_ascii=False)
-            except TypeError:
-                return str(value)
-        return str(value)
 
     def _tool_summary(self, tool: RockyToolCall) -> str:
         if not tool.completed:
@@ -432,10 +491,12 @@ class _RockyExecutedToolsState(State[RockyExecutedTools]):
     def _tool_content(self, children: list):
         return ConstrainedBox(
             constraints=BoxConstraints(maxHeight=TOOL_CONTENT_MAX_HEIGHT),
-            child=SingleChildScrollView(
-                child=Column(
-                    crossAxisAlignment=CrossAxisAlignment.stretch,
-                    children=children,
+            child=SelectionArea(
+                child=SingleChildScrollView(
+                    child=Column(
+                        crossAxisAlignment=CrossAxisAlignment.stretch,
+                        children=children,
+                    ),
                 ),
             ),
         )
@@ -479,18 +540,20 @@ class _RockyExecutedToolsState(State[RockyExecutedTools]):
             ),
         ]
         content_children = []
-        arguments = self._format_value(tool.arguments)
+        arguments = (
+            tool.arguments if isinstance(tool.arguments, str) else str(tool.arguments)
+        )
         if arguments:
             content_children.append(Text("Arguments", style=label_style))
             content_children.append(SizedBox(height=2))
-            content_children.append(SelectableText(arguments, style=body_style))
-        output = self._format_value(tool.output)
-        if output:
+            content_children.append(Text(arguments, style=body_style))
+        output_children = self._tool_output_children(tool.output, body_style)
+        if output_children:
             if content_children:
                 content_children.append(SizedBox(height=8))
-            content_children.append(Text("Result", style=label_style))
+            content_children.append(Text("Output", style=label_style))
             content_children.append(SizedBox(height=2))
-            content_children.append(SelectableText(output, style=body_style))
+            content_children.extend(output_children)
         if content_children:
             children.append(SizedBox(height=6))
             children.append(self._tool_content(content_children))
@@ -510,6 +573,39 @@ class _RockyExecutedToolsState(State[RockyExecutedTools]):
                 children=children,
             ),
         )
+
+    def _tool_output_children(self, output, body_style: TextStyle) -> list:
+        if output is None:
+            return []
+        if isinstance(output, str):
+            return [Text(output, style=body_style)] if output else []
+        if isinstance(output, list):
+            content_children = self._tool_content_part_children(output, body_style)
+            if content_children is not None:
+                return content_children
+        return [Text(str(output), style=body_style)]
+
+    def _tool_content_part_children(self, output: list, body_style: TextStyle):
+        children = []
+        text_parts: list[str] = []
+        image_children: list = []
+        for index, part in enumerate(output):
+            if isinstance(part, RockyChatTextContentPart):
+                text_parts.append(part.text)
+            elif isinstance(part, RockyChatImageContentPart):
+                image = _image_from_data_url(part.image_url, f"tool_image_{index}")
+                if image is not None:
+                    image_children.append(image)
+            else:
+                return None
+        if image_children:
+            children.append(Wrap(spacing=6, runSpacing=6, children=image_children))
+        text = "\n".join(text_parts)
+        if text:
+            if children:
+                children.append(SizedBox(height=6))
+            children.append(Text(text, style=body_style))
+        return children
 
     def build(self, context):
         color_scheme = Theme.of(context).colorScheme
@@ -561,7 +657,7 @@ class _RockyExecutedToolsState(State[RockyExecutedTools]):
             )
         ]
         if self._expanded:
-            for tool in self.widget.message.tool_calls:
+            for tool in self.widget.message.tool_calls or []:
                 children.append(self._tool_detail(context, tool))
 
         return Container(
@@ -595,7 +691,7 @@ class _RockyChatMessageListState(State[RockyChatMessageList]):
     def initState(self):
         self._scroll = ScrollController()
         self._last_count = 0
-        self._was_streaming = False
+        self._had_streaming_text = False
         self._chat = None
         self._stream_notifier = None
         self._attach(self.widget.chat)
@@ -674,12 +770,14 @@ class _RockyChatMessageListState(State[RockyChatMessageList]):
 
         force = len(messages) > self._last_count
         self._last_count = len(messages)
-        last_streaming = bool(messages) and messages[-1].streaming
-        stream_ended = self._was_streaming and not last_streaming
-        self._was_streaming = last_streaming
+        has_streaming_text = (
+            chat.streaming_text is not None if chat is not None else False
+        )
+        streaming_text_ended = self._had_streaming_text and not has_streaming_text
+        self._had_streaming_text = has_streaming_text
         if messages:
             self._scroll_to_bottom(force=force)
-        if force or stream_ended:
+        if force or streaming_text_ended:
             self._arm_drain_jump()
 
         children = []
@@ -687,35 +785,55 @@ class _RockyChatMessageListState(State[RockyChatMessageList]):
             if message.role == "developer":
                 continue
             if message.role == "tool":
+                continue
+            if message.tool_calls:
                 children.append(
                     RockyExecutedTools(
-                        message=message,
+                        message=self._tool_display_message(messages, index),
                         stream_notifier=stream_notifier,
                         key=ValueKey(f"chat_tools_{index}"),
                     )
                 )
                 continue
-            if message.streaming and message.role == "assistant":
-                children.append(
-                    _RockyAssistantStreamingBubble(
-                        message=message,
-                        stream_notifier=stream_notifier,
-                        key=ValueKey(f"chat_stream_{index}"),
-                    )
+            children.append(
+                RockyChatBubble(
+                    role=message.role,
+                    content=message.content,
+                    key=ValueKey(f"chat_{index}"),
                 )
-            else:
-                children.append(
-                    RockyChatBubble(
-                        role=message.role,
-                        content=message.content,
-                        attachments=list(message.attachments or []),
-                        key=ValueKey(f"chat_{index}"),
-                    )
+            )
+
+        if chat is not None and chat.streaming_text is not None:
+            children.append(
+                _RockyAssistantStreamingBubble(
+                    content=chat.streaming_text,
+                    stream_notifier=stream_notifier,
+                    key=ValueKey("chat_streaming_text"),
                 )
+            )
 
         return ListView(
             controller=self._scroll,
             padding=EdgeInsets.fromLTRB(16, 12, 16, 12),
             children=children,
             cacheExtent=50000,
+        )
+
+    def _tool_display_message(
+        self,
+        messages: list[RockyChatMessage],
+        index: int,
+    ) -> RockyChatMessage:
+        message = messages[index]
+        tools = [tool.model_copy(deep=True) for tool in message.tool_calls or []]
+        for following in messages[index + 1 :]:
+            if following.role != "tool":
+                break
+            for tool in tools:
+                if tool.id and tool.id == following.tool_call_id:
+                    tool.output = following.content
+                    tool.completed = True
+        return RockyChatMessage(
+            role="tool",
+            tool_calls=tools,
         )

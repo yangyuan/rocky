@@ -39,7 +39,7 @@ class _ChatPersister:
 
     def save_chat(self, chat_id: str, data: RockyChatData) -> None:
         path = self._chats_folder / f"{chat_id}.json"
-        payload = data.model_dump_json(indent=2)
+        payload = data.model_dump_json(indent=2, exclude_none=True)
         self._queue.put(lambda: path.write_text(payload, encoding="utf-8"))
 
     def create_workspace_folder(self, workspace_folder: str) -> None:
@@ -295,6 +295,7 @@ class RockyChats(ChangeNotifier):
 
     def _on_chat_persist(self, chat: RockyChat) -> None:
         if chat in self._chats:
+            self._persister.save_chat(chat.id, chat.to_data())
             self._persister.save_all_metadata([c.metadata for c in self._chats])
 
     def _on_chat_user_send(self, chat: RockyChat) -> None:
@@ -364,7 +365,10 @@ class RockyChats(ChangeNotifier):
                     logger.warning("Failed to load %s: %s", data_path, exc)
                 else:
                     messages = list(body.messages)
-            chat = RockyChat(metadata=metadata, messages=messages)
+            chat = RockyChat(
+                metadata=metadata,
+                messages=messages,
+            )
             self._wire_chat(chat)
             self._chats.append(chat)
         self._chats.sort(key=lambda chat: chat.metadata.updated_at, reverse=True)

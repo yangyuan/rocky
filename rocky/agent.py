@@ -13,24 +13,25 @@ from agents import (
     OpenAIResponsesModel,
     Runner,
 )
-from agents.items import ToolCallItem, ToolCallOutputItem
 from agents.mcp import MCPServerManager
+from agents.stream_events import StreamEvent
 from agents.tracing import set_tracing_disabled
 from openai import AsyncAzureOpenAI, AsyncOpenAI
-from openai.types.responses.response_function_tool_call import ResponseFunctionToolCall
-from openai.types.responses import ResponseTextDeltaEvent
-from pydantic import BaseModel
 
 from rocky.contracts.agent import (
     RockyAgentConfig,
     RockyAgentStatus,
-    RockyAgentStreamEvent,
-    RockyAgentStreamEventKind,
+    RockyChatChunkEvent,
+    RockyStreamEvent,
 )
 from rocky.contracts.chat import (
-    RockyAttachment,
+    RockyChatContent,
+    RockyChatFileContentPart,
+    RockyChatImageContentPart,
     RockyChatMessage,
-    RockyToolCall,
+    RockyChatContentPart,
+    RockyChatContentPartType,
+    RockyChatTextContentPart,
 )
 from rocky.contracts.mcp import (
     RockyHttpMcpServerProperties,
@@ -42,7 +43,6 @@ from rocky.contracts.mcp import (
 from rocky.contracts.model import RockyModelApi, RockyModelProviderName
 from rocky.contracts.internal import RockyRuntimeState
 from rocky.contracts.shell import RockyRuntimeShellEnvironment
-from rocky.services.attachments import RockyAttachments
 from rocky.agentic.tools.toolbox import RockyToolbox
 from rocky.agentic.tools.shell_provider import ShellProvider, ShellType
 from rocky.models.capabilities import RockyModelCapabilities
@@ -53,6 +53,7 @@ from rocky.prompts.agent import (
 )
 from rocky.prompts.app import ROCKY_TITLE_SUMMARY_INSTRUCTIONS
 from rocky.prompts.runtime import ROCKY_RUNTIME_DEVELOPER_MESSAGE_TEMPLATE
+from rocky.services.streaming import RockyStreaming
 from rocky.worker import RockyWorker, RockyWorkerEmitter
 from flut.flutter.foundation.change_notifier import ChangeNotifier
 
@@ -87,7 +88,7 @@ class RockyAgent(ChangeNotifier):
         self._config: Optional[RockyAgentConfig] = None
         self._ready_config: Optional[RockyAgentConfig] = None
         self._toolbox = RockyToolbox.from_runtime_resources([])
-        self._input_list: list[dict[str, object]] = []
+        self._history: list[RockyChatMessage] = []
         self._rebuild_task: Optional[asyncio.Task] = None
         self._status: RockyAgentStatus = RockyAgentStatus.UNCONFIGURED
         self._last_runtime_fingerprint: Optional[str] = None
@@ -125,7 +126,7 @@ class RockyAgent(ChangeNotifier):
             self._rebuild_task.cancel()
         self._rebuild_task = None
         if config is None:
-            self._input_list = []
+            self._history = []
             self._toolbox = RockyToolbox.from_runtime_resources([])
             self._set_status(RockyAgentStatus.UNCONFIGURED)
             return
@@ -141,18 +142,13 @@ class RockyAgent(ChangeNotifier):
         self._rebuild_task = asyncio.create_task(self._rebuild(config, self._toolbox))
 
     def set_history(self, messages: list[RockyChatMessage]) -> None:
-        self._input_list = [
-            self._message_to_input_item(m)
-            for m in messages
-            if m.role in ("user", "assistant", "system", "developer")
-        ]
+        self._history = [message.model_copy(deep=True) for message in messages]
         self.notifyListeners()
 
     async def stream_reply(
         self,
-        user_text: str,
-        attachments: list[RockyAttachment] = (),
-    ) -> AsyncIterator[RockyAgentStreamEvent]:
+        user_content: RockyChatContent,
+    ) -> AsyncIterator[RockyStreamEvent]:
         if self._config is None:
             raise RuntimeError("RockyAgent is not configured.")
         config = self._config
@@ -164,36 +160,24 @@ class RockyAgent(ChangeNotifier):
         if self._ready_config != config:
             raise RuntimeError("RockyAgent failed to initialize.")
 
-        user_item = self._message_to_input_item(
-            RockyChatMessage(
-                role="user",
-                content=user_text,
-                attachments=list(attachments or []),
-            )
+        user_message = RockyChatMessage(
+            role="user",
+            content=user_content,
         )
         runtime_developer_messages = self._runtime_developer_messages(config, toolbox)
-        runtime_developer_items = [
-            self._message_to_input_item(message)
-            for message in runtime_developer_messages
-        ]
-        if self._input_list:
+        if self._history:
             conversation = (
-                list(self._input_list) + runtime_developer_items + [user_item]
+                list(self._history) + runtime_developer_messages + [user_message]
             )
-        elif attachments or runtime_developer_items:
-            conversation = runtime_developer_items + [user_item]
+        elif runtime_developer_messages:
+            conversation = runtime_developer_messages + [user_message]
         else:
-            conversation = user_text
-
-        next_input: list[dict[str, object]] = []
+            conversation = [user_message]
 
         for message in runtime_developer_messages:
-            yield RockyAgentStreamEvent(
-                RockyAgentStreamEventKind.DEVELOPER_MESSAGE,
-                message=message,
-            )
+            yield message
 
-        async def _produce(emit: RockyWorkerEmitter[RockyAgentStreamEvent]) -> None:
+        async def _produce(emit: RockyWorkerEmitter[StreamEvent]) -> None:
             async with self._build_session(
                 config,
                 "\n\n".join(
@@ -208,85 +192,18 @@ class RockyAgent(ChangeNotifier):
             ) as session:
                 result = Runner.run_streamed(
                     session.inner,
-                    input=conversation,
+                    input=self._messages_to_sdk_input(conversation),
                     max_turns=ROCKY_AGENT_MAX_TURNS,
                 )
-                generation_started = False
-                pending_tool_call_ids: list[str] = []
                 async for event in result.stream_events():
-                    if event.type == "raw_response_event":
-                        if not generation_started:
-                            generation_started = True
-                            emit(
-                                RockyAgentStreamEvent(
-                                    RockyAgentStreamEventKind.GENERATION_STARTED
-                                )
-                            )
-                        if isinstance(event.data, ResponseTextDeltaEvent):
-                            delta = event.data.delta
-                            if delta:
-                                emit(
-                                    RockyAgentStreamEvent(
-                                        RockyAgentStreamEventKind.TEXT_DELTA,
-                                        delta=delta,
-                                    )
-                                )
-                    elif event.type == "run_item_stream_event":
-                        if event.name == "tool_called":
-                            tool_call = self._tool_call_payload(event.item)
-                            if tool_call is None:
-                                continue
-                            if tool_call.id:
-                                pending_tool_call_ids.append(tool_call.id)
-                            emit(
-                                RockyAgentStreamEvent(
-                                    RockyAgentStreamEventKind.TOOL_STARTED,
-                                    tool=tool_call,
-                                )
-                            )
-                        elif event.name == "tool_output":
-                            generation_started = False
-                            call_id = (
-                                pending_tool_call_ids.pop(0)
-                                if pending_tool_call_ids
-                                else ""
-                            )
-                            emit(
-                                RockyAgentStreamEvent(
-                                    RockyAgentStreamEventKind.TOOL_FINISHED,
-                                    tool=self._tool_result_payload(event.item, call_id),
-                                )
-                            )
-                        elif event.name == "reasoning_item_created":
-                            emit(
-                                RockyAgentStreamEvent(
-                                    RockyAgentStreamEventKind.REASONING
-                                )
-                            )
-                next_input.extend(result.to_input_list())
+                    emit(event)
 
         try:
-            async for event in RockyWorker.stream(_produce):
-                if event.type == RockyAgentStreamEventKind.GENERATION_STARTED:
-                    if self._status != RockyAgentStatus.RESPONDING:
-                        self._set_status(RockyAgentStatus.RESPONDING)
-                elif event.type == RockyAgentStreamEventKind.TEXT_DELTA:
-                    if self._status != RockyAgentStatus.RESPONDING:
-                        self._set_status(RockyAgentStatus.RESPONDING)
-                    yield event
-                elif event.type == RockyAgentStreamEventKind.TOOL_STARTED:
-                    self._set_status(RockyAgentStatus.EXECUTING)
-                    yield RockyAgentStreamEvent(
-                        RockyAgentStreamEventKind.MESSAGE_BOUNDARY
-                    )
-                    yield event
-                elif event.type == RockyAgentStreamEventKind.TOOL_FINISHED:
-                    self._set_status(RockyAgentStatus.SENDING)
-                    yield event
-                elif event.type == RockyAgentStreamEventKind.REASONING:
-                    if self._status != RockyAgentStatus.EXECUTING:
-                        self._set_status(RockyAgentStatus.THINKING)
-            self._input_list = list(next_input)
+            streaming = RockyStreaming()
+            async for item in streaming.stream(RockyWorker.stream(_produce)):
+                if isinstance(item, RockyChatChunkEvent) and item.state is not None:
+                    self._set_status(item.state)
+                yield item
         finally:
             if self._status in (
                 RockyAgentStatus.SENDING,
@@ -300,11 +217,15 @@ class RockyAgent(ChangeNotifier):
         if self._config is None:
             raise RuntimeError("RockyAgent is not configured.")
         config = self._config
-        conversation = [
-            {"role": m.role, "content": m.content or ""}
-            for m in messages
-            if m.role in ("user", "assistant") and not m.streaming and m.content
-        ]
+        if config.model_profile.provider == RockyModelProviderName.LITERTLM:
+            return ""
+        conversation: list[dict[str, object]] = []
+        for message in messages:
+            if message.role not in ("user", "assistant"):
+                continue
+            text = self._message_text(message)
+            if text:
+                conversation.append({"role": message.role, "content": text})
         if not conversation:
             return ""
 
@@ -357,12 +278,12 @@ class RockyAgent(ChangeNotifier):
         )
         match model_profile.provider:
             case RockyModelProviderName.LITERTLM:
-                from rocky.models.providers.litertlm import LiteRtLmModel
+                from rocky.models.providers.litertlm import LitertLmModel
 
                 path = (model_profile.name or "").strip()
                 if not path:
                     raise ValueError("LiteRT-LM model file path is required.")
-                model = LiteRtLmModel(path)
+                model = LitertLmModel(path)
             case RockyModelProviderName.AZURE_OPENAI:
                 if not model_profile.endpoint:
                     raise ValueError("endpoint is required for azure_openai")
@@ -493,60 +414,6 @@ class RockyAgent(ChangeNotifier):
             return display
         return profile.id
 
-    @classmethod
-    def _tool_call_payload(cls, item: object) -> RockyToolCall | None:
-        if not isinstance(item, ToolCallItem):
-            return None
-        raw = item.raw_item
-        if not isinstance(raw, ResponseFunctionToolCall):
-            call_id = str(getattr(raw, "call_id", getattr(raw, "id", "")) or "")
-            name = str(getattr(raw, "name", getattr(raw, "type", "tool")) or "tool")
-            arguments = getattr(raw, "arguments", getattr(raw, "input", None))
-            return RockyToolCall(
-                id=call_id,
-                name=name,
-                arguments=cls._decode_tool_arguments(arguments),
-            )
-        return RockyToolCall(
-            id=raw.call_id,
-            name=raw.name,
-            arguments=cls._decode_tool_arguments(raw.arguments),
-        )
-
-    @classmethod
-    def _tool_result_payload(cls, item: object, call_id: str) -> RockyToolCall | None:
-        if not isinstance(item, ToolCallOutputItem):
-            return None
-        output = item.output
-        return RockyToolCall(
-            id=call_id,
-            output=cls._jsonable_tool_value(output),
-            completed=True,
-        )
-
-    @classmethod
-    def _decode_tool_arguments(cls, value: object) -> object:
-        if isinstance(value, str):
-            try:
-                return json.loads(value)
-            except json.JSONDecodeError:
-                return value
-        return cls._jsonable_tool_value(value)
-
-    @staticmethod
-    def _jsonable_tool_value(value: object) -> object:
-        if value is None or isinstance(value, (str, int, float, bool)):
-            return value
-        if isinstance(value, dict):
-            return {
-                str(k): RockyAgent._jsonable_tool_value(v) for k, v in value.items()
-            }
-        if isinstance(value, (list, tuple)):
-            return [RockyAgent._jsonable_tool_value(v) for v in value]
-        if isinstance(value, BaseModel):
-            return value.model_dump(exclude_unset=True)
-        return str(value)
-
     def _runtime_state(
         self,
         config: Optional[RockyAgentConfig] = None,
@@ -607,37 +474,105 @@ class RockyAgent(ChangeNotifier):
         )
         return [RockyChatMessage(role="developer", content=body)]
 
-    @staticmethod
-    def _message_to_input_item(message: RockyChatMessage) -> dict[str, object]:
-        text = message.content or ""
-        attachments = list(message.attachments or [])
-        if not attachments:
-            return {"role": message.role, "content": text}
+    @classmethod
+    def _messages_to_sdk_input(
+        cls,
+        messages: list[RockyChatMessage],
+    ) -> list[dict[str, object]]:
+        items: list[dict[str, object]] = []
+        for message in messages:
+            items.extend(cls._message_to_sdk_input_items(message))
+        return items
 
+    @staticmethod
+    def _message_to_sdk_input_items(
+        message: RockyChatMessage,
+    ) -> list[dict[str, object]]:
+        content = RockyAgent._content_to_input_content(message.content)
+        item: dict[str, object] = {
+            "role": message.role,
+            "content": content,
+        }
+        if message.role == "tool":
+            return [
+                {
+                    "type": "function_call_output",
+                    "call_id": message.tool_call_id or "",
+                    "output": content,
+                }
+            ]
+        if message.tool_calls:
+            items: list[dict[str, object]] = []
+            if RockyAgent._message_text(message).strip():
+                items.append(item)
+            items.extend(
+                {
+                    "type": "function_call",
+                    "call_id": tool.id,
+                    "name": tool.name,
+                    "arguments": RockyAgent._function_arguments(tool.arguments),
+                }
+                for tool in message.tool_calls
+            )
+            return items
+        if message.tool_call_id is not None:
+            item["tool_call_id"] = message.tool_call_id
+        return [item]
+
+    @staticmethod
+    def _function_arguments(arguments: dict | str) -> str:
+        if isinstance(arguments, str):
+            return arguments
+        return json.dumps(arguments, ensure_ascii=False, default=str)
+
+    @staticmethod
+    def _content_to_input_content(
+        content: Optional[RockyChatContent],
+    ) -> str | list[dict[str, object]]:
+        if content is None:
+            return ""
+        if isinstance(content, str):
+            return content
         parts: list[dict[str, object]] = []
-        if text:
-            parts.append({"type": "input_text", "text": text})
-        for attachment in attachments:
-            if RockyAttachments.is_image(attachment):
-                parts.append(
-                    {
-                        "type": "input_image",
-                        "image_url": RockyAttachments.data_url(attachment),
-                    }
-                )
+        for part in content:
+            if isinstance(
+                part,
+                (
+                    RockyChatTextContentPart,
+                    RockyChatImageContentPart,
+                    RockyChatFileContentPart,
+                ),
+            ):
+                parts.append(RockyAgent._content_part_input_dict(part))
             else:
-                body = (
-                    RockyAttachments.decoded_text(attachment)
-                    if RockyAttachments.is_text(attachment)
-                    else ""
-                )
-                parts.append(
-                    {
-                        "type": "input_text",
-                        "text": (
-                            f"[Attached file: {attachment.filename}]\n"
-                            f"```\n{body}\n```"
-                        ),
-                    }
-                )
-        return {"role": message.role, "content": parts}
+                return json.dumps(content, ensure_ascii=False, default=str)
+        return parts
+
+    @staticmethod
+    def _content_part_dict(part: RockyChatContentPart) -> dict[str, object]:
+        return part.model_dump(mode="json", exclude_none=True)
+
+    @staticmethod
+    def _content_part_input_dict(part: RockyChatContentPart) -> dict[str, object]:
+        value = RockyAgent._content_part_dict(part)
+        match part.type:
+            case RockyChatContentPartType.TEXT:
+                value["type"] = "input_text"
+            case RockyChatContentPartType.IMAGE:
+                value["type"] = "input_image"
+            case RockyChatContentPartType.FILE:
+                value["type"] = "input_file"
+        return value
+
+    @staticmethod
+    def _message_text(message: RockyChatMessage) -> str:
+        content = message.content
+        if isinstance(content, str):
+            return content
+        if content is None:
+            return ""
+        parts: list[str] = []
+        for part in content:
+            if isinstance(part, RockyChatTextContentPart):
+                parts.append(part.text)
+        return "\n".join(parts)

@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
+from typing import Optional, TypeAlias
 
 from pydantic import BaseModel, Field
 
 from rocky.agentic.contracts.skill import Skill
-from rocky.contracts.chat import RockyChatMessage, RockyToolCall
+from rocky.contracts.chat import RockyChatMessage
 from rocky.contracts.mcp import RockyMcpServerProfile
 from rocky.contracts.model import RockyModelProfile
 from rocky.contracts.shell import RockyShellProfile
@@ -19,7 +20,7 @@ class RockyAgentConfig(BaseModel):
     workspace_folder: str
 
 
-class RockyAgentStatus(str, Enum):
+class RockyAgentStatus(StrEnum):
     UNCONFIGURED = "unconfigured"
     INITIALIZING = "initializing"
     READY = "ready"
@@ -29,28 +30,9 @@ class RockyAgentStatus(str, Enum):
     EXECUTING = "executing"
 
 
-class RockyAgentStreamEventKind(str, Enum):
-    GENERATION_STARTED = "generation_started"
-    TEXT_DELTA = "text_delta"
-    MESSAGE_BOUNDARY = "message_boundary"
-    DEVELOPER_MESSAGE = "developer_message"
-    TOOL_STARTED = "tool_started"
-    TOOL_FINISHED = "tool_finished"
-    REASONING = "reasoning"
+class RockyChatChunkEvent(BaseModel):
+    state: Optional[RockyAgentStatus] = None
+    delta: Optional[str] = None
 
 
-class RockyAgentStreamEvent:
-    type: RockyAgentStreamEventKind
-
-    def __init__(
-        self,
-        event_type: RockyAgentStreamEventKind,
-        *,
-        delta: str = "",
-        tool: RockyToolCall | None = None,
-        message: RockyChatMessage | None = None,
-    ) -> None:
-        self.type = event_type
-        self.delta = delta
-        self.tool = tool
-        self.message = message
+RockyStreamEvent: TypeAlias = RockyChatChunkEvent | RockyChatMessage

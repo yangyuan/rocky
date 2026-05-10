@@ -161,28 +161,14 @@ class RockyChatHeader(StatelessWidget):
     def _menu_item(self, color_scheme, model_profile):
         provider_label = RockyModelTemplates.label(model_profile.provider)
         is_active = model_profile.id == self.selected_model_profile_id
-        is_disabled = (
-            model_profile.provider == RockyModelProviderName.LITERTLM
-            and not RockySystem.is_litert_lm_installed()
-        )
         model_text = self._model_profile_model_text(model_profile)
         subtitle_parts = [provider_label]
         if RockyModelTemplates.supports_api_selection(model_profile.provider):
             subtitle_parts.append(RockyModelTemplates.api_label(model_profile.api))
         subtitle_parts.append(model_text)
-        title_color = (
-            color_scheme.onSurface.withOpacity(0.4)
-            if is_disabled
-            else color_scheme.onSurface
-        )
-        subtitle_color = (
-            color_scheme.onSurfaceVariant.withOpacity(0.5)
-            if is_disabled
-            else color_scheme.onSurfaceVariant
-        )
         return PopupMenuItem(
             value=model_profile.id,
-            enabled=not is_disabled,
+            enabled=True,
             height=44,
             child=Row(
                 mainAxisSize=MainAxisSize.max,
@@ -204,14 +190,14 @@ class RockyChatHeader(StatelessWidget):
                                     style=TextStyle(
                                         fontSize=13,
                                         fontWeight=FontWeight.w600,
-                                        color=title_color,
+                                        color=color_scheme.onSurface,
                                     ),
                                 ),
                                 Text(
                                     " \u00b7 ".join(subtitle_parts),
                                     style=TextStyle(
                                         fontSize=11,
-                                        color=subtitle_color,
+                                        color=color_scheme.onSurfaceVariant,
                                     ),
                                 ),
                             ],

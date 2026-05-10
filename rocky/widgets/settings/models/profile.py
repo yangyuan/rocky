@@ -19,9 +19,8 @@ from flut.flutter.widgets import (
     Text,
 )
 
-from rocky.contracts.model import RockyModelProfile, RockyModelProviderName
+from rocky.contracts.model import RockyModelProfile
 from rocky.models.templates import RockyModelTemplates
-from rocky.system import RockySystem
 
 
 class RockyModelProfileCard(StatelessWidget):
@@ -68,11 +67,6 @@ class RockyModelProfileCard(StatelessWidget):
             subtitle_parts.append(RockyModelTemplates.api_label(profile.api))
         subtitle_parts.append(profile.name or "(no model)")
         subtitle = " \u00b7 ".join(subtitle_parts)
-        is_selectable = not (
-            profile.provider == RockyModelProviderName.LITERTLM
-            and not RockySystem.is_litert_lm_installed()
-        )
-
         badges = [
             self._badge(
                 provider_label,
@@ -102,21 +96,6 @@ class RockyModelProfileCard(StatelessWidget):
                     ),
                 ]
             )
-        if (
-            profile.provider == RockyModelProviderName.LITERTLM
-            and not RockySystem.is_litert_lm_installed()
-        ):
-            badges.extend(
-                [
-                    SizedBox(width=6),
-                    self._badge(
-                        "LiteRT-LM not installed",
-                        color_scheme.errorContainer,
-                        color_scheme.onErrorContainer,
-                    ),
-                ]
-            )
-
         body = Container(
             padding=EdgeInsets.fromLTRB(14, 12, 8, 12),
             child=Row(
@@ -189,9 +168,7 @@ class RockyModelProfileCard(StatelessWidget):
                 color=Colors.transparent,
                 borderRadius=BorderRadius.circular(10),
                 child=InkWell(
-                    onTap=(
-                        (lambda: self.on_select(profile.id)) if is_selectable else None
-                    ),
+                    onTap=lambda: self.on_select(profile.id),
                     borderRadius=BorderRadius.circular(10),
                     hoverColor=color_scheme.onSurface.withOpacity(0.04),
                     child=body,

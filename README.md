@@ -47,16 +47,7 @@ On first launch, open the in-app settings to configure a model provider, then st
 
 Rocky is built on the OpenAI Agents SDK, which is largely provider-agnostic. In principle, Rocky can work with any model provider the SDK supports, directly or indirectly.
 
-Rocky also integrates [LiteRT-LM](https://github.com/google-ai-edge/LiteRT-LM) for **in-process local models**, letting you run models on-device without a separate server.
-
-LiteRT-LM is currently **not bundled** with Rocky and must be installed manually:
-
-```
-pip install litert-lm
-```
-
-- **macOS** and **Linux**: supported.
-- **Windows**: pending, blocked by upstream LiteRT-LM Windows support.
+Rocky also integrates [LiteRT-LM](https://github.com/google-ai-edge/LiteRT-LM) for **in-process local models**, letting you run models like Gemma 4 on-device without a separate server.
 
 ## Shell Environments
 

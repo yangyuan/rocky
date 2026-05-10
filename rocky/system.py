@@ -1,5 +1,4 @@
 import asyncio
-import importlib.util
 import logging
 import os
 import subprocess
@@ -42,15 +41,10 @@ class RockySystem:
 
     @staticmethod
     def is_tk_installed() -> bool:
+        import importlib.util
+
         try:
             return importlib.util.find_spec("tkinter") is not None
-        except Exception:
-            return False
-
-    @staticmethod
-    def is_litert_lm_installed() -> bool:
-        try:
-            return importlib.util.find_spec("litert_lm") is not None
         except Exception:
             return False
 

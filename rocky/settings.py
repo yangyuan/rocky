@@ -210,19 +210,12 @@ class RockySettings(ChangeNotifier):
                 result.append(mcp_server)
         return result
 
-    def is_model_profile_selectable(self, model_profile: RockyModelProfile) -> bool:
-        if model_profile.provider == RockyModelProviderName.LITERTLM:
-            return RockySystem.is_litert_lm_installed()
-        return True
-
     def model_profile_ready(
         self, model_profile: Optional[RockyModelProfile]
     ) -> tuple[bool, Optional[str]]:
         if model_profile is None:
             return False, "Select a model for this chat."
         if model_profile.provider == RockyModelProviderName.LITERTLM:
-            if not RockySystem.is_litert_lm_installed():
-                return False, "LiteRT-LM is not installed."
             if not model_profile.name:
                 return False, "Configure a LiteRT-LM model file in Settings."
             return True, None
@@ -265,9 +258,7 @@ class RockySettings(ChangeNotifier):
 
     def add_model_profile(self, model_profile: RockyModelProfile) -> RockyModelProfile:
         self._model_profiles = self._model_profiles + [model_profile]
-        if self._default_model_profile_id is None and self.is_model_profile_selectable(
-            model_profile
-        ):
+        if self._default_model_profile_id is None:
             self._default_model_profile_id = model_profile.id
         self._save_and_notify()
         return model_profile
@@ -286,11 +277,6 @@ class RockySettings(ChangeNotifier):
         if not replaced:
             return model_profile
         self._model_profiles = next_profiles
-        if (
-            self._default_model_profile_id == model_profile.id
-            and not self.is_model_profile_selectable(model_profile)
-        ):
-            self._default_model_profile_id = self._first_selectable_model_profile_id()
         self._save_and_notify()
         return model_profile
 
@@ -301,12 +287,12 @@ class RockySettings(ChangeNotifier):
             if model_profile.id != model_profile_id
         ]
         if self._default_model_profile_id == model_profile_id:
-            self._default_model_profile_id = self._first_selectable_model_profile_id()
+            self._default_model_profile_id = self._first_model_profile_id()
         self._save_and_notify()
 
     def set_default_model_profile(self, model_profile_id: str) -> None:
         model_profile = self.find_model_profile(model_profile_id)
-        if model_profile is None or not self.is_model_profile_selectable(model_profile):
+        if model_profile is None:
             return
         if self._default_model_profile_id == model_profile_id:
             return
@@ -459,11 +445,8 @@ class RockySettings(ChangeNotifier):
         self._default_mcp_server_ids = default_ids
         self._save_and_notify()
 
-    def _first_selectable_model_profile_id(self) -> Optional[str]:
-        for model_profile in self._model_profiles:
-            if self.is_model_profile_selectable(model_profile):
-                return model_profile.id
-        return None
+    def _first_model_profile_id(self) -> Optional[str]:
+        return self._model_profiles[0].id if self._model_profiles else None
 
     def _local_shell_profile(self) -> RockyShellProfile:
         return RockyShellProfile(
@@ -507,18 +490,11 @@ class RockySettings(ChangeNotifier):
             data = RockySettingsData()
 
         default_model_profile_id = data.default_model_id
-        selectable_ids = {
-            model_profile.id
-            for model_profile in data.models
-            if self.is_model_profile_selectable(model_profile)
-        }
-        if default_model_profile_id not in selectable_ids:
+        model_profile_ids = {model_profile.id for model_profile in data.models}
+        if default_model_profile_id not in model_profile_ids:
             default_model_profile_id = None
-        if default_model_profile_id is None:
-            for model_profile in data.models:
-                if model_profile.id in selectable_ids:
-                    default_model_profile_id = model_profile.id
-                    break
+        if default_model_profile_id is None and data.models:
+            default_model_profile_id = data.models[0].id
 
         self._theme = data.theme
         self._chats = data.chats

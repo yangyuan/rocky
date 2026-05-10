@@ -154,18 +154,21 @@ class ShellTool(Tool):
         return Tool.extract_cmd(arguments)
 
     def handle_exec(self, tool_call: ToolCall) -> ToolResult:
-        shell = self._shell(tool_call)
-        if isinstance(shell, ToolResult):
-            return shell
-        command = self._extract_command(tool_call.arguments, shell)
-        timeout_seconds = self._extract_timeout_seconds(tool_call.arguments)
-        workdir = self._extract_workdir(tool_call.arguments)
-        exec_arguments = {}
-        if timeout_seconds is not None:
-            exec_arguments["timeout_seconds"] = timeout_seconds
-        if workdir is not None:
-            exec_arguments["workdir"] = workdir
-        output = shell.naive_exec(command, **exec_arguments)
+        try:
+            shell = self._shell(tool_call)
+            if isinstance(shell, ToolResult):
+                return shell
+            command = self._extract_command(tool_call.arguments, shell)
+            timeout_seconds = self._extract_timeout_seconds(tool_call.arguments)
+            workdir = self._extract_workdir(tool_call.arguments)
+            exec_arguments = {}
+            if timeout_seconds is not None:
+                exec_arguments["timeout_seconds"] = timeout_seconds
+            if workdir is not None:
+                exec_arguments["workdir"] = workdir
+            output = shell.naive_exec(command, **exec_arguments)
+        except Exception as error:
+            output = f"shell.exec failed: {error}"
         return ToolResult(call_id=tool_call.id, output=output)
 
     def handle_download(self, tool_call: ToolCall) -> ToolResult:
