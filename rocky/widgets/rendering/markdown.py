@@ -117,19 +117,7 @@ class RockyMarkdown(StatelessWidget):
                 children.append(SizedBox(height=_block_gap(previous_block, block)))
             is_last = index == len(blocks) - 1
             attach_cursor = self.trailing_cursor and is_last
-            if attach_cursor:
-                children.append(
-                    Row(
-                        crossAxisAlignment=CrossAxisAlignment.end,
-                        mainAxisSize=MainAxisSize.min,
-                        children=[
-                            Expanded(child=renderer.render(block)),
-                            renderer.cursor_widget(),
-                        ],
-                    )
-                )
-            else:
-                children.append(renderer.render(block))
+            children.append(renderer.render(block, trailing_cursor=attach_cursor))
             previous_block = block
         if self.trailing_cursor and not blocks:
             children.append(renderer.cursor_widget())
@@ -426,31 +414,37 @@ class _RockyMarkdownRenderer:
         self.selectable = selectable
         self.selection_color = selection_color
 
-    def render(self, block):
+    def render(self, block, *, trailing_cursor=False):
         if block.kind == "heading":
-            return self._render_heading(block)
+            return self._render_heading(block, trailing_cursor=trailing_cursor)
         if block.kind == "bullet":
             return self._render_list_item(
-                block, marker=Text("\u2022", style=self.base_style)
+                block,
+                marker=Text("\u2022", style=self.base_style),
+                trailing_cursor=trailing_cursor,
             )
         if block.kind == "task":
             return self._render_list_item(
-                block, marker=self._task_checkbox_widget(block.checked)
+                block,
+                marker=self._task_checkbox_widget(block.checked),
+                trailing_cursor=trailing_cursor,
             )
         if block.kind == "numbered":
             ordinal = block.ordinals[0] if block.ordinals else 1
             return self._render_list_item(
-                block, marker=Text(f"{ordinal}.", style=self.base_style)
+                block,
+                marker=Text(f"{ordinal}.", style=self.base_style),
+                trailing_cursor=trailing_cursor,
             )
         if block.kind == "code":
-            return self._render_code_block(block)
+            return self._render_code_block(block, trailing_cursor=trailing_cursor)
         if block.kind == "quote":
-            return self._render_quote(block)
+            return self._render_quote(block, trailing_cursor=trailing_cursor)
         if block.kind == "rule":
             return self._render_rule()
         if block.kind == "table":
             return self._render_table(block)
-        return self._render_paragraph(block)
+        return self._render_paragraph(block, trailing_cursor=trailing_cursor)
 
     def cursor_widget(self):
         height = self.base_style.fontSize
@@ -461,19 +455,31 @@ class _RockyMarkdownRenderer:
             color=self.color_scheme.primary,
         )
 
-    def _render_paragraph(self, block):
-        text = "\n".join(line.strip() for line in block.lines)
-        return self._rich_text(self._inline_spans(text), style=self.base_style)
+    def _cursor_span(self):
+        return WidgetSpan(
+            alignment=PlaceholderAlignment.bottom,
+            child=SelectionContainer.disabled(child=self.cursor_widget()),
+        )
 
-    def _render_heading(self, block):
+    def _render_paragraph(self, block, *, trailing_cursor=False):
+        text = "\n".join(line.strip() for line in block.lines)
+        spans = self._inline_spans(text)
+        if trailing_cursor:
+            spans.append(self._cursor_span())
+        return self._rich_text(spans, style=self.base_style)
+
+    def _render_heading(self, block, *, trailing_cursor=False):
         style = TextStyle(
             color=self.base_style.color,
             fontSize=_HEADING_SIZES.get(block.level, 14),
             fontWeight=FontWeight.w700,
         )
-        return self._rich_text(self._inline_spans(block.lines[0]), style=style)
+        spans = self._inline_spans(block.lines[0])
+        if trailing_cursor:
+            spans.append(self._cursor_span())
+        return self._rich_text(spans, style=style)
 
-    def _render_list_item(self, block, *, marker):
+    def _render_list_item(self, block, *, marker, trailing_cursor=False):
         marker_column = Container(
             width=_list_marker_width(block) * _LIST_MARKER_CHAR_WIDTH,
             height=_line_height(self.base_style),
@@ -484,7 +490,13 @@ class _RockyMarkdownRenderer:
         for index, child in enumerate(block.children):
             if index > 0:
                 body_children.append(SizedBox(height=_LIST_SIBLING_GAP))
-            body_children.append(self.render(child))
+            is_last_child = index == len(block.children) - 1
+            body_children.append(
+                self.render(
+                    child,
+                    trailing_cursor=trailing_cursor and is_last_child,
+                )
+            )
         if not body_children:
             return marker_column
         return Row(
@@ -520,7 +532,7 @@ class _RockyMarkdownRenderer:
             ),
         )
 
-    def _render_code_block(self, block):
+    def _render_code_block(self, block, *, trailing_cursor=False):
         body = "\n".join(block.lines)
         style = TextStyle(
             color=self.base_style.color,
@@ -528,7 +540,14 @@ class _RockyMarkdownRenderer:
             fontFamily=RockySystem.monospace_font_family(),
             fontFamilyFallback=RockySystem.monospace_font_family_fallback(),
         )
-        text_widget = Text(body, style=style, selectionColor=self.selection_color)
+        if trailing_cursor:
+            text_widget = Text.rich(
+                TextSpan(text=body, children=[self._cursor_span()]),
+                style=style,
+                selectionColor=self.selection_color,
+            )
+        else:
+            text_widget = Text(body, style=style, selectionColor=self.selection_color)
         return Container(
             padding=EdgeInsets.symmetric(horizontal=10, vertical=8),
             decoration=BoxDecoration(
@@ -539,7 +558,7 @@ class _RockyMarkdownRenderer:
             child=text_widget,
         )
 
-    def _render_quote(self, block):
+    def _render_quote(self, block, *, trailing_cursor=False):
         text = "\n".join(line for line in block.lines)
         quoted_style = TextStyle(
             color=self.color_scheme.onSurfaceVariant,
@@ -547,6 +566,8 @@ class _RockyMarkdownRenderer:
             fontStyle=FontStyle.italic,
         )
         spans = self._inline_spans(text, style_override=quoted_style)
+        if trailing_cursor:
+            spans.append(self._cursor_span())
         rich = self._rich_text(spans, style=quoted_style)
         return Container(
             padding=EdgeInsets.fromLTRB(10, 6, 10, 6),

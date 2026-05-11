@@ -3,12 +3,14 @@ from typing import Callable
 from flut.dart.ui import Size
 from flut.flutter.material import (
     ButtonStyle,
+    Colors,
     MenuBar,
     MenuItemButton,
     SubmenuButton,
 )
-from flut.flutter.painting import EdgeInsets
+from flut.flutter.painting import Border, BorderRadius, BoxDecoration, EdgeInsets
 from flut.flutter.widgets import (
+    Container,
     Expanded,
     Row,
     StatelessWidget,
@@ -52,6 +54,26 @@ class RockyAppMenu(StatelessWidget):
             child=Text(prefix + label),
         )
 
+    def _theme_item(self, option, on_pressed, *, checked=None):
+        prefix = "" if checked is None else ("\u2713 " if checked else "   ")
+        return MenuItemButton(
+            style=self._button_style,
+            onPressed=on_pressed,
+            leadingIcon=self._theme_swatch(option.seed),
+            child=Text(prefix + option.label),
+        )
+
+    def _theme_swatch(self, color):
+        return Container(
+            width=14,
+            height=14,
+            decoration=BoxDecoration(
+                color=color,
+                border=Border.all(width=1, color=Colors.grey600),
+                borderRadius=BorderRadius.circular(4),
+            ),
+        )
+
     def _submenu(self, label, children):
         return SubmenuButton(
             style=self._button_style,
@@ -73,8 +95,8 @@ class RockyAppMenu(StatelessWidget):
         return self._submenu(
             "Theme",
             [
-                self._item(
-                    opt.label,
+                self._theme_item(
+                    opt,
                     (lambda tid=opt.id: self.settings.set_theme_color(tid)),
                     checked=(theme.color == opt.id),
                 )
