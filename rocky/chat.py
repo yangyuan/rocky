@@ -37,10 +37,16 @@ class RockyChat(ChangeNotifier):
         *,
         metadata: Optional[RockyChatMetadata] = None,
         messages: Optional[list[RockyChatMessage]] = None,
+        input_text: str = "",
+        input_attachments: Optional[list[RockyChatFileContentPart]] = None,
     ):
         super().__init__()
         self._metadata = metadata or RockyChatMetadata()
         self._messages: list[RockyChatMessage] = list(messages or [])
+        self._input_text = input_text
+        self._input_attachments = [
+            attachment.model_copy(deep=True) for attachment in (input_attachments or [])
+        ]
         self._streaming_text: Optional[str] = None
         self._agent: Optional[RockyAgent] = None
         self._agent_provider: Optional[Callable[[], RockyAgent]] = None
@@ -145,6 +151,37 @@ class RockyChat(ChangeNotifier):
     def workspace_folder(self) -> Optional[str]:
         return self._metadata.workspace_folder
 
+    @property
+    def input_text(self) -> str:
+        return self._input_text
+
+    @property
+    def input_attachments(self) -> list[RockyChatFileContentPart]:
+        return [
+            attachment.model_copy(deep=True) for attachment in self._input_attachments
+        ]
+
+    def set_input_text(self, input_text: str, *, notify: bool = True) -> None:
+        value = input_text or ""
+        if self._input_text == value:
+            return
+        self._input_text = value
+        if notify:
+            self.notifyListeners()
+
+    def set_input_attachments(
+        self,
+        input_attachments: list[RockyChatFileContentPart],
+        *,
+        notify: bool = True,
+    ) -> None:
+        value = [attachment.model_copy(deep=True) for attachment in input_attachments]
+        if self._input_attachments == value:
+            return
+        self._input_attachments = value
+        if notify:
+            self.notifyListeners()
+
     def set_model_profile(self, model_profile_id: Optional[str]) -> None:
         if self._metadata.model_id == model_profile_id:
             return
@@ -243,7 +280,7 @@ class RockyChat(ChangeNotifier):
                 attachments[0].filename if attachments else ""
             )
             self._metadata = self._metadata.model_copy(
-                update={"title": self._derive_title(title_seed)}
+                update={"title": self.derive_title(title_seed)}
             )
         self.notifyListeners()
         self._on_user_send(self)
@@ -383,8 +420,8 @@ class RockyChat(ChangeNotifier):
         self.notifyListeners()
         self._on_message_complete(self)
 
-    @staticmethod
-    def _derive_title(text: str) -> str:
+    @classmethod
+    def derive_title(cls, text: str) -> str:
         compact = " ".join(text.strip().split())
         if not compact:
             return DEFAULT_CHAT_TITLE

@@ -32,6 +32,7 @@ from rocky.widgets.settings.mcp.page import RockySettingsMcpPage
 from rocky.widgets.settings.models.page import RockySettingsModelsPage
 from rocky.widgets.settings.skills.page import RockySettingsSkillsPage
 from rocky.widgets.settings.shells.page import RockySettingsShellsPage
+from rocky.widgets.settings.templates.page import RockySettingsTemplatesPage
 
 
 class _NavigationRow(StatelessWidget):
@@ -160,6 +161,12 @@ class _RockySettingsDialogState(State[RockySettingsDialog]):
                         onTap=lambda: self._set_page("mcp"),
                     ),
                     _NavigationRow(
+                        icon=Icons.description_outlined,
+                        label="Templates",
+                        is_selected=self.page == "templates",
+                        onTap=lambda: self._set_page("templates"),
+                    ),
+                    _NavigationRow(
                         icon=Icons.chat_bubble_outline,
                         label="Chats",
                         is_selected=self.page == "chats",
@@ -217,6 +224,11 @@ class _RockySettingsDialogState(State[RockySettingsDialog]):
         )
 
     def _body(self):
+        if self.page == "templates":
+            return RockySettingsTemplatesPage(
+                key=ValueKey("settings-templates"),
+                chats=self.widget.chats,
+            )
         if self.page == "chats":
             return RockySettingsChatsPage(
                 key=ValueKey("settings-chats"),

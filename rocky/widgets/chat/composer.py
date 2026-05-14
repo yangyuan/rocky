@@ -54,24 +54,30 @@ class RockyChatComposer(StatefulWidget):
 class _RockyChatComposerState(State[RockyChatComposer]):
     def initState(self):
         self._controller = TextEditingController(text="")
+        self._controller.addListener(self._on_input_changed)
         self._focus = FocusNode()
         self._chat = None
         self._attachments = []
+        self._updating_controller = False
         self._attach(self.widget.chat)
 
     def dispose(self):
         self._detach()
+        self._controller.removeListener(self._on_input_changed)
 
     def didUpdateWidget(self, old_widget):
         if old_widget.chat is not self.widget.chat:
             self._detach()
-            self._attachments = []
             self._attach(self.widget.chat)
 
     def _attach(self, chat):
         self._chat = chat
         if chat is not None:
+            self._set_controller_text(chat.input_text)
+            self._attachments = chat.input_attachments
             chat.addListener(self._on_chat_changed)
+        else:
+            self._attachments = []
 
     def _detach(self):
         if self._chat is not None:
@@ -79,7 +85,30 @@ class _RockyChatComposerState(State[RockyChatComposer]):
             self._chat = None
 
     def _on_chat_changed(self):
+        chat = self._chat
+        if chat is not None and self._controller.text != chat.input_text:
+            self._set_controller_text(chat.input_text)
+        if chat is not None and self._attachments != chat.input_attachments:
+            self._attachments = chat.input_attachments
         self.setState(lambda: None)
+
+    def _on_input_changed(self):
+        if self._updating_controller:
+            return
+        chat = self._chat
+        if chat is None:
+            return
+        chat.set_input_text(self._controller.text, notify=False)
+
+    def _set_controller_text(self, text):
+        value = text or ""
+        if self._controller.text == value:
+            return
+        self._updating_controller = True
+        try:
+            self._controller.text = value
+        finally:
+            self._updating_controller = False
 
     def _on_attach(self):
         picked = RockyAttachmentPicker.pick()
@@ -90,6 +119,9 @@ class _RockyChatComposerState(State[RockyChatComposer]):
             self._attachments = list(self._attachments) + picked
 
         self.setState(_apply)
+        chat = self._chat
+        if chat is not None:
+            chat.set_input_attachments(self._attachments, notify=False)
 
     def _remove_attachment(self, index):
         if index < 0 or index >= len(self._attachments):
@@ -99,6 +131,9 @@ class _RockyChatComposerState(State[RockyChatComposer]):
             del self._attachments[index]
 
         self.setState(_apply)
+        chat = self._chat
+        if chat is not None:
+            chat.set_input_attachments(self._attachments, notify=False)
 
     def _submit(self, value=None):
         widget = self.widget
@@ -113,7 +148,9 @@ class _RockyChatComposerState(State[RockyChatComposer]):
         if not text and not attachments:
             return
         self._controller.clear()
+        chat.set_input_text("", notify=False)
         self._attachments = []
+        chat.set_input_attachments([], notify=False)
         widget.on_send(text, attachments)
         SchedulerBinding.instance.addPostFrameCallback(
             lambda _: self._focus.requestFocus()

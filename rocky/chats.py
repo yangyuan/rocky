@@ -14,7 +14,15 @@ from pydantic import ValidationError
 from rocky.agent import RockyAgent
 from rocky.chat import RockyChat
 from rocky.contracts.agent import RockyAgentConfig
-from rocky.contracts.chat import RockyChatData, RockyChatMessage, RockyChatMetadata
+from rocky.contracts.chat import (
+    DEFAULT_CHAT_TITLE,
+    RockyChatData,
+    RockyChatMessage,
+    RockyChatMetadata,
+    RockyChatTemplate,
+    RockyChatTemplateData,
+    RockyChatTemplateMetadata,
+)
 from flut.flutter.foundation.change_notifier import ChangeNotifier
 from rocky.models.capabilities import RockyModelCapabilities
 from rocky.settings import RockySettings
@@ -23,14 +31,19 @@ logger = logging.getLogger(__name__)
 
 CHATS_METADATA_FILENAME = "chats.json"
 CHATS_FOLDER_NAME = "chats"
+TEMPLATES_METADATA_FILENAME = "templates.json"
+TEMPLATES_FOLDER_NAME = "templates"
 
 
 class _ChatPersister:
     def __init__(self, rocky_user_folder: str):
         rocky_user_path = Path(rocky_user_folder)
-        self._metadata_path = rocky_user_path / CHATS_METADATA_FILENAME
+        self._chats_metadata_path = rocky_user_path / CHATS_METADATA_FILENAME
         self._chats_folder = rocky_user_path / CHATS_FOLDER_NAME
+        self._templates_metadata_path = rocky_user_path / TEMPLATES_METADATA_FILENAME
+        self._templates_folder = rocky_user_path / TEMPLATES_FOLDER_NAME
         self._chats_folder.mkdir(parents=True, exist_ok=True)
+        self._templates_folder.mkdir(parents=True, exist_ok=True)
         self._queue: "queue.Queue[Callable[[], None]]" = queue.Queue()
         self._thread = threading.Thread(
             target=self._run, daemon=True, name="rocky-chats-persister"
@@ -42,6 +55,11 @@ class _ChatPersister:
         payload = data.model_dump_json(indent=2, exclude_none=True)
         self._queue.put(lambda: path.write_text(payload, encoding="utf-8"))
 
+    def save_template(self, template_id: str, data: RockyChatTemplateData) -> None:
+        path = self._templates_folder / f"{template_id}.json"
+        payload = data.model_dump_json(indent=2, exclude_none=True)
+        self._queue.put(lambda: path.write_text(payload, encoding="utf-8"))
+
     def create_workspace_folder(self, workspace_folder: str) -> None:
         self._queue.put(
             lambda: Path(workspace_folder).mkdir(parents=True, exist_ok=True)
@@ -50,7 +68,15 @@ class _ChatPersister:
     def save_all_metadata(self, items: list[RockyChatMetadata]) -> None:
         payload = json.dumps([item.model_dump() for item in items], indent=2)
         self._queue.put(
-            lambda: self._metadata_path.write_text(payload, encoding="utf-8")
+            lambda: self._chats_metadata_path.write_text(payload, encoding="utf-8")
+        )
+
+    def save_all_template_metadata(
+        self, items: list[RockyChatTemplateMetadata]
+    ) -> None:
+        payload = json.dumps([item.model_dump() for item in items], indent=2)
+        self._queue.put(
+            lambda: self._templates_metadata_path.write_text(payload, encoding="utf-8")
         )
 
     def delete_chat(self, chat_id: str, workspace_folder: Optional[str]) -> None:
@@ -58,6 +84,10 @@ class _ChatPersister:
         self._queue.put(lambda: path.unlink(missing_ok=True))
         if workspace_folder is not None:
             self._queue.put(lambda: shutil.rmtree(workspace_folder, ignore_errors=True))
+
+    def delete_template(self, template_id: str) -> None:
+        path = self._templates_folder / f"{template_id}.json"
+        self._queue.put(lambda: path.unlink(missing_ok=True))
 
     def _run(self) -> None:
         while True:
@@ -74,6 +104,7 @@ class RockyChats(ChangeNotifier):
         self._settings = settings
         self._persister = _ChatPersister(settings.rocky_user_folder)
         self._chats: list[RockyChat] = []
+        self._templates: list[RockyChatTemplate] = []
         self._draft: Optional[RockyChat] = None
         self._current: Optional[RockyChat] = None
         self._load()
@@ -87,13 +118,21 @@ class RockyChats(ChangeNotifier):
         )
 
     @property
+    def templates(self) -> list[RockyChatTemplate]:
+        return sorted(
+            self._templates,
+            key=lambda template: template.metadata.updated_at,
+            reverse=True,
+        )
+
+    @property
     def current(self) -> RockyChat:
         if self._current is None:
             raise RuntimeError("RockyChats has no current chat.")
         return self._current
 
     def new_chat(self) -> None:
-        if self._current is self._draft:
+        if self._current is self._draft and self._draft_is_blank():
             return
         self._start_draft()
 
@@ -118,6 +157,74 @@ class RockyChats(ChangeNotifier):
             self._start_draft()
         else:
             self.notifyListeners()
+
+    def save_current_as_template(self) -> None:
+        chat = self.current
+        title = chat.title
+        input_text = chat.input_text
+        metadata = RockyChatTemplateMetadata(
+            title=title,
+            model_id=self.model_profile_id_for(chat),
+            shell_ids=self.shell_profile_ids_for(chat),
+            skill_ids=self.skill_ids_for(chat),
+            mcp_server_ids=self.mcp_server_ids_for(chat),
+        )
+        data = RockyChatTemplateData(
+            messages=[message.model_copy(deep=True) for message in chat.messages],
+            input_text=input_text,
+            input_attachments=chat.input_attachments,
+        )
+        template = RockyChatTemplate(metadata=metadata, data=data)
+        self._templates.insert(0, template)
+        self._persister.save_template(template.id, template.data)
+        self._persister.save_all_template_metadata(
+            [template.metadata for template in self._templates]
+        )
+        self.notifyListeners()
+
+    def load_template(self, template_id: str) -> None:
+        template = next(
+            (candidate for candidate in self._templates if candidate.id == template_id),
+            None,
+        )
+        if template is None:
+            return
+        if self._current is self._draft:
+            self._discard_draft()
+        metadata = RockyChatMetadata(
+            title=template.metadata.title,
+            custom_title=True,
+            model_id=template.metadata.model_id,
+            shell_ids=list(template.metadata.shell_ids),
+            skill_ids=list(template.metadata.skill_ids),
+            mcp_server_ids=list(template.metadata.mcp_server_ids),
+        )
+        chat = RockyChat(
+            metadata=metadata,
+            messages=[
+                message.model_copy(deep=True) for message in template.data.messages
+            ],
+            input_text=template.data.input_text,
+            input_attachments=template.data.input_attachments,
+        )
+        self._install_draft(chat)
+        self.notifyListeners()
+
+    def delete_template(self, template_id: str) -> None:
+        target = next(
+            (template for template in self._templates if template.id == template_id),
+            None,
+        )
+        if target is None:
+            return
+        self._templates = [
+            template for template in self._templates if template.id != template_id
+        ]
+        self._persister.delete_template(template_id)
+        self._persister.save_all_template_metadata(
+            [template.metadata for template in self._templates]
+        )
+        self.notifyListeners()
 
     def model_profile_for(self, chat: RockyChat):
         if chat.model_profile_id is None:
@@ -154,6 +261,12 @@ class RockyChats(ChangeNotifier):
     def model_profile_id_for(self, chat: RockyChat) -> Optional[str]:
         model_profile = self.model_profile_for(chat)
         return model_profile.id if model_profile is not None else None
+
+    def explorer_workspace_folder_for(self, chat: RockyChat) -> str:
+        workspace_folder = chat.workspace_folder
+        if workspace_folder is not None and Path(workspace_folder).exists():
+            return workspace_folder
+        return self._settings.workspace_home_folder
 
     def toggle_shell_profile(
         self, chat: RockyChat, shell_profile_id: str, selected: bool
@@ -208,6 +321,20 @@ class RockyChats(ChangeNotifier):
 
     def _build_draft(self) -> RockyChat:
         return RockyChat()
+
+    def _draft_is_blank(self) -> bool:
+        if self._draft is None:
+            return True
+        return (
+            not self._draft.messages
+            and not self._draft.input_text.strip()
+            and not self._draft.input_attachments
+            and self._draft.title == DEFAULT_CHAT_TITLE
+            and self._draft.model_profile_id is None
+            and self._draft.shell_profile_ids is None
+            and self._draft.skill_ids is None
+            and self._draft.mcp_server_ids is None
+        )
 
     def _install_draft(self, chat: RockyChat) -> None:
         self._wire_chat(chat)
@@ -338,6 +465,10 @@ class RockyChats(ChangeNotifier):
             self._start_draft()
 
     def _load(self) -> None:
+        self._load_chats()
+        self._load_templates()
+
+    def _load_chats(self) -> None:
         rocky_user_folder = Path(self._settings.rocky_user_folder)
         metadata_path = rocky_user_folder / CHATS_METADATA_FILENAME
         chats_folder = rocky_user_folder / CHATS_FOLDER_NAME
@@ -372,3 +503,35 @@ class RockyChats(ChangeNotifier):
             self._wire_chat(chat)
             self._chats.append(chat)
         self._chats.sort(key=lambda chat: chat.metadata.updated_at, reverse=True)
+
+    def _load_templates(self) -> None:
+        rocky_user_folder = Path(self._settings.rocky_user_folder)
+        metadata_path = rocky_user_folder / TEMPLATES_METADATA_FILENAME
+        templates_folder = rocky_user_folder / TEMPLATES_FOLDER_NAME
+        if not metadata_path.exists():
+            return
+        try:
+            raw = json.loads(metadata_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.warning("Failed to read %s: %s", metadata_path, exc)
+            return
+        for item in raw or []:
+            try:
+                metadata = RockyChatTemplateMetadata.model_validate(item)
+            except ValidationError as exc:
+                logger.warning("Skipping invalid template metadata %r: %s", item, exc)
+                continue
+            data = RockyChatTemplateData()
+            data_path = templates_folder / f"{metadata.id}.json"
+            if data_path.exists():
+                try:
+                    data = RockyChatTemplateData.model_validate_json(
+                        data_path.read_text(encoding="utf-8")
+                    )
+                except (OSError, ValidationError) as exc:
+                    logger.warning("Failed to load %s: %s", data_path, exc)
+            self._templates.append(RockyChatTemplate(metadata=metadata, data=data))
+        self._templates.sort(
+            key=lambda template: template.metadata.updated_at,
+            reverse=True,
+        )

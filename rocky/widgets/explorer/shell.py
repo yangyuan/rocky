@@ -2,7 +2,7 @@ import asyncio
 import os
 import shlex
 import shutil
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 from flut.dart import Brightness, Color
 from flut.dart.ui import Clip
@@ -173,7 +173,7 @@ class RockyShellExplorer(StatefulWidget):
 
 class _RockyShellExplorerState(State[RockyShellExplorer]):
     def initState(self):
-        self._path = "/"
+        self._path: PureWindowsPath | PurePosixPath | None = None
         self._directories: list[str] = []
         self._files: list[str] = []
         self._loading = not self.widget.initial_error
@@ -192,13 +192,19 @@ class _RockyShellExplorerState(State[RockyShellExplorer]):
         super().dispose()
 
     @staticmethod
-    def _get_working_directory(provider: ShellProvider) -> str:
+    def _path_from_text(path: str) -> PureWindowsPath | PurePosixPath:
+        windows_path = PureWindowsPath(path)
+        return windows_path if windows_path.drive else PurePosixPath(path)
+
+    @staticmethod
+    def _get_working_directory(
+        provider: ShellProvider,
+    ) -> PureWindowsPath | PurePosixPath:
         if provider.is_local:
             base = (
                 Path(provider.local_workdir) if provider.local_workdir else Path.cwd()
             )
-            path = base.resolve().as_posix()
-            return path if path.endswith("/") else path + "/"
+            return _RockyShellExplorerState._path_from_text(str(base.resolve()))
         result = provider.subprocess_exec(["pwd"])
         if result.returncode != 0:
             stderr = result.stderr.strip() if result.stderr else "unknown error"
@@ -206,7 +212,7 @@ class _RockyShellExplorerState(State[RockyShellExplorer]):
         path = result.stdout.strip()
         if not path:
             raise RuntimeError("pwd returned empty output")
-        return path if path.endswith("/") else path + "/"
+        return PurePosixPath(path)
 
     @staticmethod
     def _list_directory(
@@ -285,7 +291,10 @@ class _RockyShellExplorerState(State[RockyShellExplorer]):
             )
         except Exception as error:
             print(f"[RockyShellExplorer] pwd failed, falling back to /: {error}")
-            self._path = "/"
+            self._error = str(error)
+            self._loading = False
+            self.setState(lambda: None)
+            return
         await self._load()
 
     async def _load(self):
@@ -302,12 +311,14 @@ class _RockyShellExplorerState(State[RockyShellExplorer]):
         self._error = ""
         self.setState(lambda: None)
         try:
+            if self._path is None:
+                raise RuntimeError("Environment Explorer has no working directory.")
             loop = asyncio.get_event_loop()
             directories, files = await loop.run_in_executor(
                 None,
                 self._list_directory,
                 provider,
-                self._path,
+                str(self._path),
             )
             self._directories = directories
             self._files = files
@@ -331,31 +342,31 @@ class _RockyShellExplorerState(State[RockyShellExplorer]):
             self._selected = None
             self.setState(lambda: None)
 
-    def _child_path(self, name: str) -> str:
-        return (
-            self._path + name if self._path.endswith("/") else self._path + "/" + name
-        )
+    def _child_path(self, name: str) -> PureWindowsPath | PurePosixPath:
+        if self._path is None:
+            raise RuntimeError("Environment Explorer has no working directory.")
+        return self._path / name
 
     def _navigate(self, directory_name: str):
-        if self.widget.provider is None:
+        if self.widget.provider is None or self._path is None:
             return
-        path = self._child_path(directory_name)
-        self._path = path if path.endswith("/") else path + "/"
+        self._path = self._child_path(directory_name)
         asyncio.create_task(self._load())
 
     def _navigate_to(self, absolute_path: str):
-        if self.widget.provider is None:
+        if self.widget.provider is None or self._path is None:
             return
-        self._path = (
-            absolute_path if absolute_path.endswith("/") else absolute_path + "/"
-        )
+        self._path = type(self._path)(absolute_path)
         asyncio.create_task(self._load())
 
     def _navigate_up(self):
-        if self._path == "/":
+        if self._path is None:
             return
-        parent = self._path.rstrip("/").rsplit("/", 1)[0]
-        self._navigate_to(parent or "/")
+        parent = self._path.parent
+        if parent == self._path:
+            return
+        self._path = parent
+        asyncio.create_task(self._load())
 
     def _refresh(self):
         if self.widget.provider is not None:
@@ -364,7 +375,9 @@ class _RockyShellExplorerState(State[RockyShellExplorer]):
     def _save_as(self, filename: str):
         asyncio.create_task(self._save_files([(self._child_path(filename), filename)]))
 
-    async def _save_files(self, files: list[tuple[str, str]]):
+    async def _save_files(
+        self, files: list[tuple[PureWindowsPath | PurePosixPath, str]]
+    ):
         provider = self.widget.provider
         if provider is None:
             return
@@ -407,7 +420,7 @@ class _RockyShellExplorerState(State[RockyShellExplorer]):
                         None,
                         self._read_file,
                         provider,
-                        remote_path,
+                        str(remote_path),
                     )
                     with open(destination, "wb") as output_file:
                         output_file.write(data)
@@ -433,7 +446,9 @@ class _RockyShellExplorerState(State[RockyShellExplorer]):
             self._delete_path(self._child_path(directory_name), is_directory=True)
         )
 
-    async def _delete_path(self, remote_path: str, *, is_directory: bool):
+    async def _delete_path(
+        self, remote_path: PureWindowsPath | PurePosixPath, *, is_directory: bool
+    ):
         provider = self.widget.provider
         if provider is None:
             return
@@ -444,14 +459,14 @@ class _RockyShellExplorerState(State[RockyShellExplorer]):
                     None,
                     self._delete_directory,
                     provider,
-                    remote_path,
+                    str(remote_path),
                 )
             else:
                 await loop.run_in_executor(
                     None,
                     self._delete_file,
                     provider,
-                    remote_path,
+                    str(remote_path),
                 )
             await self._load()
         except Exception as error:
@@ -486,16 +501,12 @@ class _RockyShellExplorerState(State[RockyShellExplorer]):
                 try:
                     with open(path, "rb") as input_file:
                         data = input_file.read()
-                    remote_path = (
-                        target_path + filename
-                        if target_path.endswith("/")
-                        else target_path + "/" + filename
-                    )
+                    remote_path = target_path / filename
                     await loop.run_in_executor(
                         None,
                         self._write_file,
                         provider,
-                        remote_path,
+                        str(remote_path),
                         data,
                     )
                 except Exception as error:
@@ -662,15 +673,8 @@ class _RockyShellExplorerState(State[RockyShellExplorer]):
 
     def _build_navigation_bar(self, background, text_color):
         has_provider = self.widget.provider is not None
-        parts = [part for part in self._path.split("/") if part]
-        crumbs = [
-            InkWell(
-                onTap=(lambda: self._navigate_to("/")) if has_provider else None,
-                child=Text("/", style=TextStyle(fontSize=13, color=text_color)),
-            )
-        ]
-        for index, part in enumerate(parts):
-            target = "/" + "/".join(parts[: index + 1]) + "/"
+        crumbs = []
+        for label, target in self._breadcrumbs():
             crumbs.append(
                 InkWell(
                     onTap=(
@@ -679,7 +683,7 @@ class _RockyShellExplorerState(State[RockyShellExplorer]):
                         else None
                     ),
                     child=Text(
-                        part + "/",
+                        label,
                         style=TextStyle(fontSize=13, color=text_color),
                     ),
                 )
@@ -716,6 +720,22 @@ class _RockyShellExplorerState(State[RockyShellExplorer]):
                 ],
             ),
         )
+
+    def _breadcrumbs(self) -> list[tuple[str, str]]:
+        if self._path is None:
+            return []
+        parts = self._path.parts
+        if not parts:
+            return []
+        separator = "\\" if isinstance(self._path, PureWindowsPath) else "/"
+        first = parts[0]
+        label = first if first.endswith(("/", "\\")) else first + separator
+        current = type(self._path)(first)
+        items = [(label, str(current))]
+        for part in parts[1:]:
+            current = current / part
+            items.append((part + separator, str(current)))
+        return items
 
     def _build_tile_grid(self, context, text_color, dim_color, is_dark):
         tiles = []

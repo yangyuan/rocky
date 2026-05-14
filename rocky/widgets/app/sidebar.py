@@ -511,12 +511,13 @@ class _RockySidebarState(State[RockySidebar]):
         current = chats.current
         current_id = current.id if current is not None else None
         saved = chats.saved
+        templates = chats.templates
         color_scheme = theme.colorScheme
 
         if self.collapsed:
             return Container()
 
-        if not saved:
+        if not saved and not templates:
             return Container(
                 padding=EdgeInsets.fromLTRB(14, 6, 14, 6),
                 child=Text(
@@ -528,17 +529,43 @@ class _RockySidebarState(State[RockySidebar]):
                 ),
             )
 
-        header = Container(
-            padding=EdgeInsets.fromLTRB(14, 10, 14, 4),
-            child=Text(
-                "Chats",
-                style=TextStyle(
-                    fontSize=11,
-                    fontWeight=FontWeight.w600,
-                    color=color_scheme.onSurfaceVariant,
+        def _header(label):
+            return Container(
+                padding=EdgeInsets.fromLTRB(14, 10, 14, 4),
+                child=Text(
+                    label,
+                    style=TextStyle(
+                        fontSize=11,
+                        fontWeight=FontWeight.w600,
+                        color=color_scheme.onSurfaceVariant,
+                    ),
                 ),
-            ),
-        )
+            )
+
+        def _template_row(template):
+            return Container(
+                padding=EdgeInsets.symmetric(horizontal=8, vertical=2),
+                child=_SidebarItem(
+                    icon=Icons.description_outlined,
+                    label=template.title or "Untitled template",
+                    collapsed=False,
+                    onTap=lambda template_id=template.id: self.widget.chats.load_template(
+                        template_id
+                    ),
+                ),
+            )
+
+        def _empty_chats():
+            return Container(
+                padding=EdgeInsets.fromLTRB(14, 6, 14, 6),
+                child=Text(
+                    "No saved chats yet",
+                    style=TextStyle(
+                        fontSize=11,
+                        color=color_scheme.onSurfaceVariant,
+                    ),
+                ),
+            )
 
         def _row(chat):
             return Container(
@@ -553,17 +580,19 @@ class _RockySidebarState(State[RockySidebar]):
                 ),
             )
 
-        return Column(
-            crossAxisAlignment=CrossAxisAlignment.stretch,
-            children=[
-                header,
-                Expanded(
-                    child=ListView(
-                        padding=EdgeInsets.only(bottom=8),
-                        children=[_row(c) for c in saved],
-                    ),
-                ),
-            ],
+        children = []
+        if templates:
+            children.append(_header("Templates"))
+            children.extend(_template_row(template) for template in templates)
+        children.append(_header("Chats"))
+        if saved:
+            children.extend(_row(chat) for chat in saved)
+        else:
+            children.append(_empty_chats())
+
+        return ListView(
+            padding=EdgeInsets.only(bottom=8),
+            children=children,
         )
 
     def build(self, context):

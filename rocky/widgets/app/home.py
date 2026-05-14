@@ -1,4 +1,3 @@
-import os
 from typing import Callable
 
 from flut.flutter.material import Colors, Dialog, Scaffold, showDialog
@@ -68,13 +67,13 @@ class RockyHome(StatelessWidget):
                 context,
                 self.settings.shell_profiles,
                 shell_profile_id,
-                current_chat.workspace_folder
-                or os.path.join(self.settings.workspace_home_folder, current_chat.id),
+                self.chats.explorer_workspace_folder_for(current_chat),
             )
 
         menu = RockyAppMenu(
             settings=self.settings,
             on_new_chat=self.chats.new_chat,
+            on_save_template=self.chats.save_current_as_template,
             on_open_settings=open_settings,
             on_open_shell_explorer=open_shell_explorer,
             on_open_about=open_about,

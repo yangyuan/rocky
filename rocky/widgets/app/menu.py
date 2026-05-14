@@ -32,6 +32,7 @@ class RockyAppMenu(StatelessWidget):
         *,
         settings: RockySettings,
         on_new_chat: Callable[[], None],
+        on_save_template: Callable[[], None],
         on_open_settings: Callable[..., None],
         on_open_shell_explorer: Callable[[str], None],
         on_open_about: Callable[[], None],
@@ -41,6 +42,7 @@ class RockyAppMenu(StatelessWidget):
         super().__init__(key=key)
         self.settings = settings
         self.on_new_chat = on_new_chat
+        self.on_save_template = on_save_template
         self.on_open_settings = on_open_settings
         self.on_open_shell_explorer = on_open_shell_explorer
         self.on_open_about = on_open_about
@@ -144,6 +146,7 @@ class RockyAppMenu(StatelessWidget):
                 self._submenu(
                     "File",
                     [
+                        self._item("Save as Template", self.on_save_template),
                         self._item("Settings", self.on_open_settings),
                         self._item("Exit", self.on_exit),
                     ],
